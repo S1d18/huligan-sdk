@@ -1,12 +1,11 @@
 # Huligan Antidetect — Quick Start
 
-Три способа запуска — выбери свой:
+Два способа запуска — выбери свой:
 
 | Способ | Для кого | Что нужно |
 |--------|----------|-----------|
 | **[A. Python SDK](#a-python-sdk-рекомендуется)** | Разработчик, автоматизация | Python 3.9+, `pip install` |
-| **[B. Лаунчер](#b-лаунчер)** | Ручной запуск с прокси | Python 3.11+ |
-| **[C. Вручную](#c-ручной-запуск)** | Минимальная настройка | Только chrome.exe |
+| **[B. Вручную](#b-ручной-запуск)** | Минимальная настройка | Только chrome.exe |
 
 ---
 
@@ -145,64 +144,7 @@ async with Browser(proxy="socks5://user:pass@ip:port") as browser:
 
 ---
 
-## B. Лаунчер
-
-Скрипт-обёртка для запуска из терминала. Делает то же самое что SDK, но без написания кода.
-
-### 1. Скачать Chrome
-
-ZIP из [Releases](../../releases) → распаковать в `C:\huligan\`.
-
-### 2. Создать профиль
-
-Вариант 1 — сгенерировать через SDK:
-```bash
-python -c "
-from huligan import FingerprintGenerator
-gen = FingerprintGenerator()
-profile = gen.generate()
-open('profile.conf', 'w').write(profile.to_conf())
-print('Done')
-"
-```
-
-Вариант 2 — скопировать из huligan-browser (если установлен):
-```bash
-# profiles находятся в huligan-browser/patches/profiles/
-cp /path/to/huligan-browser/patches/profiles/dolphin_anty_reference.conf profile.conf
-```
-
-Вариант 3 — минимальный вручную:
-```ini
-# profile.conf
-platform=Win32
-cpu_cores=8
-device_memory=8
-canvas_noise_seed=13549036856797210343
-languages=en-US,en
-timezone=America/New_York
-```
-
-### 3. Запустить
-
-```bash
-python patches/scripts/huligan_launcher.py \
-  --proxy "socks5://user:pass@host:port" \
-  --conf profile.conf \
-  --chrome C:/huligan/chrome.exe
-```
-
-> **Note:** `huligan_launcher.py` is part of the huligan-browser monorepo (not this SDK). With the SDK, use `Browser(proxy=..., profile_path=...)` instead.
-
-Лаунчер автоматически:
-- GeoIP → определяет таймзону, язык, координаты по IP прокси
-- Обновляет `.conf` файл с гео-данными
-- Поднимает SOCKS5 форвардер (no-auth → auth)
-- Запускает Chrome с правильными флагами
-
----
-
-## C. Ручной запуск
+## B. Ручной запуск
 
 Без Python, без скриптов — только chrome.exe и .conf файл.
 
@@ -324,20 +266,6 @@ with open("profile.conf", "w") as f:
 
 Генератор подбирает: экран, CPU, RAM, GPU + WebGL параметры, шрифты (79-159 для Windows), noise seeds, media devices, battery, connection.
 
-### Через auto_profile.py (по IP прокси)
-
-> **Note:** `auto_profile.py` is part of the huligan-browser monorepo (not this SDK). Use `FingerprintGenerator` from the SDK instead (see section A.3 above).
-
-```bash
-# SDK equivalent:
-python -c "
-from huligan import FingerprintGenerator
-gen = FingerprintGenerator()
-profile = gen.generate()
-open('profile.conf', 'w').write(profile.to_conf())
-"
-```
-
 ### GPU тиры
 
 | Тир | Пример webgl_renderer |
@@ -366,9 +294,8 @@ open('profile.conf', 'w').write(profile.to_conf())
 
 | Документ | Что внутри |
 |----------|------------|
-| [README.md](README.md) | Обзор проекта, структура, патчи |
-| PARAMETER_MAPPING | Все ключи .conf → C++ файлы Chromium — см. huligan-browser repo |
-| [docs/PROXY_LAUNCH_GUIDE.md](docs/PROXY_LAUNCH_GUIDE.md) | Прокси: форвардер, DNS leak, WebRTC |
-| [docs/GEOIP_SETUP.md](docs/GEOIP_SETUP.md) | Настройка MaxMind GeoLite2 |
-| TESTING_GUIDE | Руководство по тестированию — см. huligan-browser repo |
+| [README.md](../README.md) | Обзор SDK, API reference |
+| [docs/BROWSER_AUTOMATION.md](BROWSER_AUTOMATION.md) | Что работает / заблокировано в Playwright |
+| [docs/PROXY_LAUNCH_GUIDE.md](PROXY_LAUNCH_GUIDE.md) | Прокси: форвардер, DNS leak, WebRTC |
+| [docs/GEOIP_SETUP.md](GEOIP_SETUP.md) | Настройка MaxMind GeoLite2 |
 | [examples/](../examples/) | Примеры SDK |

@@ -18,6 +18,7 @@ Environment overrides:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -26,12 +27,13 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from .version import CHROME_VERSION
 
 DEFAULT_REPO = "S1d18/huligan-releases"
 ASSET_NAME_TEMPLATE = "huligan-chrome-{version}-win64.zip"
+GH_API = "https://api.github.com"
 
 # SHA256 of officially published archives. Verified before extraction.
 _KNOWN_SHA256 = {
@@ -46,7 +48,35 @@ def _cache_root() -> Path:
     return Path.home() / ".huligan" / "chrome"
 
 
-def _build_url(version: str) -> str:
+def _resolve_asset(repo: str, version: str, asset_name: str, token: str) -> Tuple[str, dict]:
+    """Look up the release asset id via GitHub API and return its download URL.
+
+    GitHub's browser-facing ``releases/download/...`` URL returns 404 for
+    private repos even with a Bearer token. The API endpoint
+    ``/repos/{owner}/{repo}/releases/assets/{id}`` works for both private
+    and public repos and is the only path GitHub officially supports for
+    authenticated downloads.
+    """
+    api_url = f"{GH_API}/repos/{repo}/releases/tags/v{version}"
+    req = urllib.request.Request(api_url)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    with urllib.request.urlopen(req) as response:
+        release = json.loads(response.read())
+
+    for asset in release.get("assets", []):
+        if asset.get("name") == asset_name:
+            return f"{GH_API}/repos/{repo}/releases/assets/{asset['id']}", release
+
+    available = [a.get("name") for a in release.get("assets", [])]
+    raise RuntimeError(
+        f"Asset {asset_name!r} not found in release v{version} of {repo}.\n"
+        f"Available assets: {available}"
+    )
+
+
+def _build_browser_url(version: str) -> str:
     repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
     asset = ASSET_NAME_TEMPLATE.format(version=version)
     return f"https://github.com/{repo}/releases/download/v{version}/{asset}"
@@ -58,6 +88,8 @@ def _download(url: str, dest: Path, token: Optional[str] = None) -> None:
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
+        # Critical for the API asset endpoint — without it GitHub returns
+        # JSON metadata instead of the binary.
         req.add_header("Accept", "application/octet-stream")
 
     with urllib.request.urlopen(req) as response:
@@ -122,15 +154,40 @@ def ensure_chrome(version: str = CHROME_VERSION) -> Path:
     if chrome_exe.is_file() and sentinel.exists():
         return chrome_exe
 
-    url = _build_url(version)
+    repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
+    asset_name = ASSET_NAME_TEMPLATE.format(version=version)
     token = os.environ.get("HULIGAN_GH_TOKEN")
+
+    if token:
+        try:
+            url, _ = _resolve_asset(repo, version, asset_name, token)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                raise RuntimeError(
+                    f"GitHub rejected HULIGAN_GH_TOKEN (HTTP 401). "
+                    f"Re-issue it via `gh auth token` and re-export."
+                ) from exc
+            if exc.code == 403:
+                raise RuntimeError(
+                    f"GitHub denied access to {repo} (HTTP 403). "
+                    f"Check that the token has 'repo' scope and that the "
+                    f"account can see this repository."
+                ) from exc
+            if exc.code == 404:
+                raise RuntimeError(
+                    f"Release v{version} not found in {repo} (HTTP 404). "
+                    f"Verify the version number and HULIGAN_RELEASES_REPO."
+                ) from exc
+            raise
+    else:
+        url = _build_browser_url(version)
 
     print(f"[huligan] Chrome {version} not in cache, downloading...")
     print(f"[huligan] Source: {url}")
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
-        zip_path = tmp / ASSET_NAME_TEMPLATE.format(version=version)
+        zip_path = tmp / asset_name
 
         try:
             _download(url, zip_path, token=token)

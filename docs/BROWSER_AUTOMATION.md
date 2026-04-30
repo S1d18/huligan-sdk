@@ -283,6 +283,51 @@ page.on("response", handle_response)
 
 \* `locator.evaluate()` may work in some cases where `page.evaluate()` doesn't — it uses a different CDP path.
 
+## When you really need to run JS (escape hatches)
+
+The cheatsheet above covers ~90% of cases. For the rest — when you actually need to compute something in JS that has no locator equivalent (canvas fingerprinting, custom DOM walks, math) — two patterns work because they don't go through CDP `Runtime.evaluate`.
+
+### Pattern 1: `page.add_init_script()` for main-world setup
+
+Runs in main world BEFORE any page script on every navigation. Use it to install hooks, stub APIs, or pre-compute values.
+
+```python
+await page.add_init_script(
+    "window.__marker = 'init_ran_' + navigator.userAgent.length;"
+)
+await page.goto("https://example.com")
+# Read the result via DOM (e.g. the page renders it, or you injected it into the DOM yourself)
+```
+
+### Pattern 2: `data:` URL with inline `<script>` writing to the DOM
+
+If you need to run arbitrary JS and read the result, navigate to a `data:` URL whose `<script>` writes the result to `document.title` (or a hidden `<div>`), then read it via `page.title()` / `locator.text_content()`.
+
+```python
+import urllib.parse
+
+js_html = """
+<!doctype html><title>pending</title>
+<script>
+  const c = document.createElement('canvas');
+  c.width = 280; c.height = 60;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f60';
+  ctx.fillText('test', 4, 35);
+  document.title = String(c.toDataURL().length);
+</script>
+"""
+url = "data:text/html;charset=utf-8," + urllib.parse.quote(js_html)
+await page.goto(url)
+result = await page.title()  # e.g. "182"
+```
+
+This works because the `<script>` tag executes inside the page's normal V8 isolate — the stealth patch only blocks **CDP-injected** evaluate, not page-authored JS.
+
+### What still doesn't work
+
+A python-side stress loop that calls `page.evaluate()` per iteration is **fundamentally impossible** with our patched chrome — every iteration goes through `Runtime.evaluate` and hangs to the timeout. If you need to stress-test something (canvas, audio, WebGL stability), do it inside a single page that loops in JS and writes progress to `document.title`, then poll the title from python.
+
 ## CDP Helpers Reference
 
 Available from `huligan.automation`:

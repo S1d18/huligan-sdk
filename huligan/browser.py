@@ -232,6 +232,9 @@ class Browser:
             primary_lang = language.split(",")[0].split("-")[0]
             chrome_args.append(f"--lang={primary_lang}")
             chrome_args.append(f"--accept-lang={language}")
+            # Prevent Chrome from reducing navigator.languages and Accept-Language to one entry
+            chrome_args.append("--disable-features=ReduceAcceptLanguage,ReduceAcceptLanguageHTTP")
+            chrome_args.append("--disable-reduce-accept-language")
 
         # User data dir
         if self._user_data_dir_input:

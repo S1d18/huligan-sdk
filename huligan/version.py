@@ -8,10 +8,11 @@ from the public binary mirror.
 
 # Internal build counter — bumped whenever the SDK is republished against
 # the same Chrome version (bug fixes, doc updates, dependency changes).
-BUILD_NUMBER = 3
+# Resets to 1 on each Chrome major bump.
+BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "147.0.7727.56"
+CHROME_VERSION = "148.0.7778.97"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

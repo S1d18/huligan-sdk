@@ -175,11 +175,31 @@ class FingerprintProfile:
         lines.append(f"timezone={self.timezone}")
         lines.append("")
 
-        # Media
+        # Media Devices — format matches what 12_media_devices.py C++ patch reads
+        seed_str = str(self.canvas_noise_seed)
+        def _mid(suffix):
+            return hashlib.sha256(f"{seed_str}_{suffix}".encode()).hexdigest()
+
+        audio_in_did  = _mid("audio_in_device")
+        audio_grp_id  = _mid("audio_group")
+        audio_out_did = _mid("audio_out_device")
+        video_did     = _mid("video_device")
+        video_grp_id  = _mid("video_group")
+
         lines.append("# Media Devices")
-        lines.append(f"media_devices_video_input_label={self.media_devices_video_input_label}")
-        lines.append(f"media_devices_audio_input_label={self.media_devices_audio_input_label}")
-        lines.append(f"media_devices_audio_output_label={self.media_devices_audio_output_label}")
+        lines.append("media_devices_count=3")
+        lines.append("media_device_0_kind=audioinput")
+        lines.append(f"media_device_0_label={self.media_devices_audio_input_label}")
+        lines.append(f"media_device_0_device_id={audio_in_did}")
+        lines.append(f"media_device_0_group_id={audio_grp_id}")
+        lines.append("media_device_1_kind=audiooutput")
+        lines.append(f"media_device_1_label={self.media_devices_audio_output_label}")
+        lines.append(f"media_device_1_device_id={audio_out_did}")
+        lines.append(f"media_device_1_group_id={audio_grp_id}")
+        lines.append("media_device_2_kind=videoinput")
+        lines.append(f"media_device_2_label={self.media_devices_video_input_label}")
+        lines.append(f"media_device_2_device_id={video_did}")
+        lines.append(f"media_device_2_group_id={video_grp_id}")
         lines.append("")
 
         # Battery
@@ -226,6 +246,11 @@ class FingerprintProfile:
         # WebGPU flag
         lines.append("# WebGPU")
         lines.append("webgpu_enabled=1")
+        lines.append("")
+
+        # WebRTC blocking
+        lines.append("# WebRTC")
+        lines.append("webrtc_block=1")
         lines.append("")
 
         return '\n'.join(lines)

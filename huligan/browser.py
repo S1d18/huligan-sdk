@@ -177,7 +177,14 @@ class Browser:
         if self._geo and not timezone:
             timezone = self._geo.timezone
         if self._geo and not language:
-            language = self._geo.language
+            # Expand GeoIP language to include en-US,en (Dolphin Anty parity)
+            geo_lang = self._geo.language or "en-US"
+            parts = [p.strip() for p in geo_lang.split(",") if p.strip()]
+            if "en-US" not in parts:
+                parts.append("en-US")
+            if "en" not in parts:
+                parts.append("en")
+            language = ",".join(parts)
 
         if timezone or language:
             self._update_conf(timezone, language)

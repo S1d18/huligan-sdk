@@ -38,6 +38,7 @@ GH_API = "https://api.github.com"
 # SHA256 of officially published archives. Verified before extraction.
 _KNOWN_SHA256 = {
     "147.0.7727.56": "a0b84882d1c3d8686bc5083be5ea43c43b0d6d85db63ae335b11b6bbdb4d0e28",
+    "148.0.7778.97": "48d474fc7e78bce8b02230ad358c35809a3b49bd843d87f12992973b293e1180",
 }
 
 

@@ -42,6 +42,7 @@ automation = ["pytweening>=1.0.4", "loguru>=0.7.0"]
 agents = ["playwright>=1.40.0"]
 markdown = ["trafilatura>=2.0", "markdownify>=0.11"]
 captcha = ["aiohttp>=3.9"]
+vision = ["aiohttp>=3.9"]
 all = [
     "playwright>=1.40.0",
     "geoip2>=2.9.0",

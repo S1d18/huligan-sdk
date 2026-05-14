@@ -15,6 +15,7 @@ pip install huligan[playwright]   # Browser automation (required for new_page())
 pip install huligan[geoip]        # Local GeoIP database (faster than API fallback)
 pip install huligan[automation]   # Human-like mouse/keyboard
 pip install huligan[captcha]      # Async wrappers for 2Captcha / AntiCaptcha / CapSolver
+pip install huligan[vision]       # Vision-LLM agent: click elements by description
 ```
 
 ## How It Works
@@ -412,6 +413,66 @@ override the constructor defaults. Solver errors and timeouts raise
 `CaptchaSolveError`. See `examples/example_captcha.py` for the full
 flow against the official reCAPTCHA demo page.
 
+### `vision` — click elements by natural-language description via a vision LLM
+
+Take a screenshot, ask a vision-LLM where the described element is,
+then dispatch a real mouse click at the returned pixel coords. Useful
+when pages have unstable selectors, heavily-obfuscated class names, or
+canvas/SVG controls that aren't reachable through normal locators.
+
+Supports OpenAI (`gpt-4o` family) and Anthropic (`claude-3-5-sonnet-latest`).
+Every action routes through `page.mouse.*` / `page.keyboard.*` /
+`page.screenshot()` — no `page.evaluate()` calls, which paranoid mode
+blocks.
+
+Install:
+
+```bash
+pip install huligan[vision]
+```
+
+Config via env or constructor:
+
+```bash
+export HULIGAN_VISION_PROVIDER=openai          # or anthropic
+export HULIGAN_VISION_API_KEY=sk-...
+export HULIGAN_VISION_MODEL=gpt-4o             # optional override
+```
+
+```python
+from huligan import Browser
+from huligan.vision import VisionAgent
+
+agent = VisionAgent.from_env()
+
+async with Browser(proxy="socks5://...") as b:
+    page = await b.new_page()
+    await page.goto("https://example.com/checkout")
+
+    # Click by description — agent screenshots, asks LLM, clicks.
+    await agent.click(page, "the red 'Add to cart' button")
+
+    # Locate without acting — returns (x, y) or None.
+    coords = await agent.locate(page, "the cookie-consent dialog's 'Accept' button")
+
+    # Find an input and type into it.
+    await agent.fill(page, "the email field at the top of the form", "user@example.com")
+
+    # Hover to reveal menus.
+    await agent.hover(page, "the 'Account' avatar in the top-right corner")
+
+    # Double-click sugar.
+    await agent.double_click(page, "the file icon labelled 'report.pdf'")
+```
+
+The LLM returns `{x, y, confidence}` per call. `locate()` returns
+`None` (and the action methods return `False`) when confidence is
+below `confidence_threshold` (default `0.5`, overridable per call) or
+when the model reports "not found". Pass a per-instance
+`confidence_threshold=` to the constructor or per-call to any method.
+HTTP errors and unparseable replies raise `VisionAgentError`. See
+`examples/example_vision_click.py` for the full flow.
+
 ### `automation`
 
 Behavioural helpers split across modules. Mouse/keyboard need the
@@ -486,6 +547,7 @@ See `examples/` directory:
 | `example_scraping_pagination.py` | Scrape with pagination and error handling |
 | `example_markdown.py` | HTML → Markdown for LLM consumption |
 | `example_captcha.py` | Solve reCAPTCHA / Turnstile / hCaptcha via 2Captcha / AntiCaptcha / CapSolver |
+| `example_vision_click.py` | Click elements by natural-language description via OpenAI / Anthropic vision LLMs |
 | `agents/example_basic_scrape.py` | High-level scraping pool (single browser) |
 | `agents/example_pool.py` | Round-robin across multiple identities |
 

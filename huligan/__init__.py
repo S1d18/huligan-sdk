@@ -62,6 +62,14 @@ try:
 except ImportError:
     pass
 
+# Vision-LLM agent — requires huligan[vision]
+_HAS_VISION = False
+try:
+    from .vision import VisionAgent, VisionAgentError
+    from .vision import _AVAILABLE as _HAS_VISION
+except ImportError:
+    pass
+
 __version__ = "1.0.0"
 __all__ = [
     "Browser",
@@ -87,3 +95,5 @@ if _HAS_MARKDOWN:
     __all__ += ["extract_markdown", "MarkdownExtractor"]
 if _HAS_CAPTCHA:
     __all__ += ["CaptchaSolver", "CaptchaSolveError"]
+if _HAS_VISION:
+    __all__ += ["VisionAgent", "VisionAgentError"]

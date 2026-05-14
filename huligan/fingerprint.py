@@ -100,6 +100,43 @@ class FingerprintProfile:
     # WebGL parameters (GL enum -> value, auto-populated from GPU)
     webgl_params: Dict[int, object] = field(default_factory=dict)
 
+    @classmethod
+    def from_seed(
+        cls,
+        seed: int,
+        *,
+        platform: str = "Win32",
+        gpu_vendor_preference: Optional[str] = None,
+    ) -> "FingerprintProfile":
+        """
+        Build a deterministic profile from a single integer seed.
+
+        Same seed + same SDK major version => same profile. Quick path for
+        users who don't want to specify all 50+ fields manually.
+        ``audio_noise_seed=0`` is enforced regardless of seed (BrowserScan
+        flags any non-zero audio noise as "Audio modified manually").
+
+        Args:
+            seed: Any non-negative integer. Internally sha256-hashed, so
+                values larger than 2**64 are supported.
+            platform: ``"Win32"``, ``"MacIntel"``, or ``"Linux x86_64"``.
+                Defaults to Win32 (highest population share).
+            gpu_vendor_preference: ``"nvidia"``, ``"amd"``, ``"intel"``,
+                or ``None`` to let the seed pick.
+
+        Returns:
+            FingerprintProfile ready to ``.to_conf()`` and pass to
+            ``Browser(profile_path=...)``.
+
+        Example:
+            >>> profile = FingerprintProfile.from_seed(12345)
+            >>> Path("p.conf").write_text(profile.to_conf())
+        """
+        return FingerprintGenerator(seed=seed).generate(
+            platform=platform,
+            gpu_vendor_preference=gpu_vendor_preference,
+        )
+
     def to_conf(self) -> str:
         """Convert to .conf file format"""
         lines = []

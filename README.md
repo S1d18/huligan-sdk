@@ -58,30 +58,47 @@ asyncio.run(main())
 
 ### With custom fingerprint
 
+**Quick path — one integer, full profile** (recommended for most users):
+
 ```python
 import asyncio
-from huligan import Browser, FingerprintGenerator
+from huligan import Browser, FingerprintProfile
 from pathlib import Path
 
 async def main():
-    # Generate reproducible profile (same seed = same fingerprint)
-    gen = FingerprintGenerator(seed=12345)
-    profile = gen.generate(platform="Win32", gpu_vendor_preference="nvidia")
+    # Single seed in, deterministic 50-field profile out.
+    # Same seed + same SDK version = identical fingerprint.
+    profile = FingerprintProfile.from_seed(
+        seed=12345,
+        platform="Win32",                # "MacIntel" / "Linux x86_64"
+        gpu_vendor_preference="nvidia",  # "amd" / "intel" / None
+    )
 
-    # Save to .conf
-    conf_path = Path("my_profile.conf")
+    conf_path = Path("my_profile.conf").resolve()
     conf_path.write_text(profile.to_conf())
 
-    # Launch with saved profile
     async with Browser(
         proxy="socks5://user:pass@ip:port",
-        profile_path=str(conf_path.resolve()),
+        profile_path=str(conf_path),
     ) as browser:
         page = await browser.new_page()
         await page.goto("https://browserscan.net")
         await page.wait_for_timeout(30000)
 
 asyncio.run(main())
+```
+
+**Power-user path — explicit Generator** (when you want to override
+individual fields before persisting):
+
+```python
+from huligan import FingerprintGenerator
+
+gen = FingerprintGenerator(seed=12345)
+profile = gen.generate(platform="Win32", gpu_vendor_preference="nvidia")
+profile.timezone = "Asia/Tokyo"            # override anything
+profile.connection_effective_type = "3g"
+Path("my_profile.conf").write_text(profile.to_conf())
 ```
 
 ### Without proxy (local testing)
@@ -238,7 +255,8 @@ See `examples/` directory:
 | `example_simple.py` | Minimal — 5 lines |
 | `example_with_proxy.py` | Full proxy chain with GeoIP info |
 | `example_no_proxy.py` | Local testing without proxy |
-| `example_custom_fingerprint.py` | Reproducible seed-based profile |
+| `example_from_seed.py` | One-line profile factory: `FingerprintProfile.from_seed(N)` |
+| `example_custom_fingerprint.py` | Reproducible seed-based profile (Generator API) |
 
 **Multi-account & scaling:**
 

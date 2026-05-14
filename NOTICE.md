@@ -30,6 +30,41 @@ listed component must comply with that component's license.
 | `pytweening` | MIT | https://github.com/asweigart/pytweening | `[automation]` |
 | `loguru` | MIT | https://github.com/Delgan/loguru | `[automation]` |
 
+### Operator-supplied fonts (optional, never bundled by this SDK)
+
+The patched binary supports a per-profile `fonts_dir` setting that
+registers operator-supplied font files (`.ttf`, `.otf`) process-locally
+at startup so canvas / WebGL glyph rendering can match the OS the
+spoofed User-Agent claims. **Huligan never bundles fonts**: the SDK
+and the binary distribution ship none, and the operator is responsible
+for sourcing files whose licenses they comply with.
+
+Recommended legally-safe fillers (download separately):
+
+| Font family | License | Source |
+|-------------|---------|--------|
+| Noto Color Emoji | Apache 2.0 | https://github.com/googlefonts/noto-emoji |
+| Noto Sans CJK (JP/KR/SC/TC) | SIL OFL 1.1 | https://github.com/googlefonts/noto-cjk |
+| Noto Sans / Noto Serif | SIL OFL 1.1 | https://fonts.google.com/noto |
+| DejaVu Sans / Serif / Mono | Public-domain-equivalent (Bitstream Vera derivative) | https://dejavu-fonts.github.io/ |
+| Liberation Sans / Serif / Mono | SIL OFL 1.1 | https://github.com/liberationfonts/liberation-fonts |
+
+**Do not** drop the following into a `fonts_dir` you intend to
+redistribute or use across machines you do not own:
+
+- **Apple Color Emoji** (proprietary, Apple EULA — no redistribution).
+- **Segoe UI Emoji**, **Segoe UI**, **Cambria Math**, and other
+  Microsoft fonts bundled with Windows (proprietary, Microsoft EULA).
+- Adobe / commercial foundry fonts you have not separately licensed.
+
+Where the canvas-fingerprint check on your target site specifically
+demands an Apple- or Microsoft-shipped glyph hash, the supported
+deployment is to RUN the binary on a host that already has those
+fonts installed system-wide under its own legitimate license — the
+patch will pick them up via the normal Windows / macOS font
+enumeration. The `fonts_dir` mechanism is meant for fonts you own or
+can redistribute.
+
 ### GeoIP data (downloaded at runtime, if `[geoip]` is installed)
 
 The SDK can use the MaxMind **GeoLite2** database for IP geolocation.

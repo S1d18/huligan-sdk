@@ -120,6 +120,40 @@ class FingerprintProfile:
     webrtc_local_ipv4: str = ""
     webrtc_local_ipv6: str = ""
 
+    # V8/ICU native locale spoof (huligan-browser
+    # patches/chromium/17_locale.py). Drives the "default" locale that
+    # Intl.DateTimeFormat / Collator / NumberFormat fall back to, and
+    # the Accept-Language HTTP header. Empty = let upstream Chromium
+    # pick from the host OS locale. The patch reads this key as
+    # intl_locale=; languages= is read separately.
+    intl_locale: str = ""
+
+    # WebGPU adapter limits / features / subgroup sizes
+    # (huligan-browser patches/chromium/10_webgpu.py v2). Empty values
+    # = passthrough (the patched binary keeps whatever the underlying
+    # adapter exposes). Set together with webgl_renderer for an
+    # internally-consistent GPU class.
+    #
+    # Note: the navigator.deviceMemory cap of 8 GB does NOT apply here
+    # — these are raw numbers from the WebGPU spec.
+    webgpu_max_buffer_size: int = 0                       # bytes; 0 = passthrough
+    webgpu_max_storage_buffer_binding_size: int = 0       # bytes
+    webgpu_max_compute_workgroup_size_x: int = 0
+    webgpu_max_compute_workgroup_size_y: int = 0
+    webgpu_max_compute_workgroup_size_z: int = 0
+    webgpu_features: List[str] = field(default_factory=list)  # complete set, not delta
+    webgpu_subgroup_min_size: int = 0
+    webgpu_subgroup_max_size: int = 0
+
+    # Optional directory of operator-supplied .ttf/.otf fonts. When
+    # non-empty, the patched Chromium registers every font file in
+    # this directory process-locally before any enumeration runs,
+    # so canvas / WebGL glyph rendering matches the OS the UA claims.
+    # Recommended fillers (Apache 2.0 / SIL OFL — no proprietary
+    # MS/Apple fonts): Noto Color Emoji, Noto Sans CJK, DejaVu,
+    # Liberation. See NOTICE.md for the licensing matrix.
+    fonts_dir: str = ""
+
     # WebGL parameters (GL enum -> value, auto-populated from GPU)
     webgl_params: Dict[int, object] = field(default_factory=dict)
 
@@ -277,6 +311,32 @@ class FingerprintProfile:
         lines.append(f"webgpu_architecture={self.webgpu_architecture}")
         lines.append(f"webgpu_device={self.webgpu_device}")
         lines.append(f"webgpu_description={self.webgpu_description}")
+        # v2 extensions — only emitted when set so the .conf stays clean
+        # and the C++ patch falls through to passthrough by default.
+        if self.webgpu_max_buffer_size:
+            lines.append(f"webgpu_max_buffer_size={self.webgpu_max_buffer_size}")
+        if self.webgpu_max_storage_buffer_binding_size:
+            lines.append(
+                f"webgpu_max_storage_buffer_binding_size={self.webgpu_max_storage_buffer_binding_size}"
+            )
+        if self.webgpu_max_compute_workgroup_size_x:
+            lines.append(
+                f"webgpu_max_compute_workgroup_size_x={self.webgpu_max_compute_workgroup_size_x}"
+            )
+        if self.webgpu_max_compute_workgroup_size_y:
+            lines.append(
+                f"webgpu_max_compute_workgroup_size_y={self.webgpu_max_compute_workgroup_size_y}"
+            )
+        if self.webgpu_max_compute_workgroup_size_z:
+            lines.append(
+                f"webgpu_max_compute_workgroup_size_z={self.webgpu_max_compute_workgroup_size_z}"
+            )
+        if self.webgpu_features:
+            lines.append(f"webgpu_features={','.join(self.webgpu_features)}")
+        if self.webgpu_subgroup_min_size:
+            lines.append(f"webgpu_subgroup_min_size={self.webgpu_subgroup_min_size}")
+        if self.webgpu_subgroup_max_size:
+            lines.append(f"webgpu_subgroup_max_size={self.webgpu_subgroup_max_size}")
         lines.append("")
 
         # Noise
@@ -291,11 +351,17 @@ class FingerprintProfile:
         # Fonts
         lines.append("# Fonts")
         lines.append(f"fonts={','.join(self.fonts)}")
+        if self.fonts_dir:
+            lines.append(f"fonts_dir={self.fonts_dir}")
         lines.append("")
 
         # Geo
         lines.append("# Geolocation")
         lines.append(f"languages={self.languages}")
+        if self.intl_locale:
+            # Read by the V8/ICU and Accept-Language hooks. Empty key
+            # falls back to languages[0] inside the patched binary.
+            lines.append(f"intl_locale={self.intl_locale}")
         lines.append(f"geolocation_latitude={self.geolocation_latitude}")
         lines.append(f"geolocation_longitude={self.geolocation_longitude}")
         lines.append(f"geolocation_accuracy={self.geolocation_accuracy}")

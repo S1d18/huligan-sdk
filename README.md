@@ -234,14 +234,43 @@ print(result.timezone, result.language, result.country_name)
 manager.close()
 ```
 
-### `automation` (optional)
+### `automation`
+
+Behavioural helpers split across modules. Mouse/keyboard need the
+`[automation]` extra (pytweening + loguru); scroll/idle have no extra
+deps beyond playwright.
 
 ```python
 from huligan.automation import (
-    human_like_mouse_click,  # Curved mouse movement + click
-    human_like_type,         # Realistic typing with delays
-    human_like_hotkey,       # Key combinations (Ctrl+A, Tab, etc.)
+    # huligan[automation] — Bezier mouse with sub-step curving, easing,
+    # post-click drift; realistic typing with typos, double-presses,
+    # chunked rhythm, word/long pauses.
+    human_like_mouse_click,
+    human_like_type,
+    human_like_hotkey,
+
+    # No extra deps — useful for behavioural-biometrics warmup.
+    # Untargeted scrolling with chunk jitter and occasional reverse-wheel.
+    human_like_scroll,
+    human_like_scroll_to_top,
+    # Tiny natural cursor jitter during reading pauses. Mitigates the
+    # "motionless cursor = bot" signal that reCAPTCHA v3 / Cloudflare
+    # Turnstile / FingerprintJS Pro behaviour-signal weight heavily.
+    idle_mouse_movement,
+    simulated_reading_pause,
 )
+```
+
+Example — read-and-scroll feed warmup:
+
+```python
+async with Browser(proxy="socks5://...") as browser:
+    page = await browser.new_page()
+    await page.goto("https://news.ycombinator.com")
+    await simulated_reading_pause(page, words=80)       # ~22s read
+    await human_like_scroll(page, "down", distance=900, speed_mode="medium")
+    await simulated_reading_pause(page, words=60, intensity="subtle")
+    await human_like_scroll(page, "down", distance=1200)
 ```
 
 ## Examples

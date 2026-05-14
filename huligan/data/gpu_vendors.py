@@ -186,10 +186,59 @@ INTEL_DISCRETE_MODELS = [
 ]
 
 # === Apple Silicon (macOS only) ===
-APPLE_SILICON = [
-    "M1", "M1 Pro", "M2", "M2 Max", "M2 Pro",
-    "M3", "M3 Max", "M3 Pro", "M4", "M4 Max", "M4 Pro",
+#
+# Each entry: (chip_name, cpu_cores, device_memory_gb, weight)
+# Weights approximate the installed base — newer chips dominate
+# fresh purchases but the M1/M1 Pro generation still represents a
+# large fraction of MacBooks in active use, so the distribution is
+# bottom-heavy on M1/M2 rather than a flat list.
+#
+# cpu_cores values are *total* cores reported by
+# navigator.hardwareConcurrency (Apple Silicon reports total = perf + efficiency).
+# device_memory is capped at 8 by the navigator.deviceMemory spec
+# (Chrome rounds down: 16+ GB still reports 8). We keep the real
+# RAM in a separate column for any future channel that exposes it.
+#
+# This list directly addresses CloakBrowser #236: hardcoding
+# "Apple M2" leaks fingerprint diversity across all macOS profiles.
+APPLE_SILICON_PROFILES = [
+    # (chip, cpu_cores, real_ram_gb, weight)
+    ("M1",        8,  8,  18),
+    ("M1 Pro",   10, 16,  10),
+    ("M1 Max",   10, 32,   4),
+    ("M2",        8,  8,  15),
+    ("M2 Pro",   12, 16,   9),
+    ("M2 Max",   12, 32,   4),
+    ("M3",        8,  8,  12),
+    ("M3 Pro",   12, 18,   8),
+    ("M3 Max",   14, 36,   4),
+    ("M4",       10, 16,   8),
+    ("M4 Pro",   14, 24,   5),
+    ("M4 Max",   16, 36,   3),
 ]
+
+# Legacy alias (some callers still iterate APPLE_SILICON as a list of names)
+APPLE_SILICON = [p[0] for p in APPLE_SILICON_PROFILES]
+
+
+def pick_apple_silicon_profile(rng=None):
+    """
+    Return a weighted-random Apple Silicon profile suitable for a
+    macOS fingerprint.
+
+    Returns ``(chip_name, cpu_cores, real_ram_gb)``. The renderer
+    string is built via ``format_apple_renderer(chip_name)``.
+
+    Callers that pass through ``FingerprintProfile.cpu_cores`` and
+    ``device_memory`` should use these values directly so the profile
+    stays internally consistent (a "M3 Max" reporting 4 cores would
+    light up cross-source heuristics).
+    """
+    if rng is None:
+        import random as _random
+        rng = _random
+    weights = [p[3] for p in APPLE_SILICON_PROFILES]
+    return rng.choices([p[:3] for p in APPLE_SILICON_PROFILES], weights=weights, k=1)[0]
 
 
 # === ANGLE Renderer String Formatters ===
@@ -271,24 +320,39 @@ AMD_GPUS = AMD_DISCRETE
 INTEL_GPUS = INTEL_INTEGRATED
 
 
-def get_random_gpu(vendor_preference=None, rng=None):
+def get_random_gpu(vendor_preference=None, rng=None, platform="Win32"):
     """
     Get random GPU combination with realistic distribution.
 
-    Distribution when vendor_preference is None:
+    Distribution when ``vendor_preference`` is None and
+    ``platform == "Win32"``:
     - 60% integrated graphics (Intel UHD/Iris, AMD Vega)
     - 40% discrete graphics (NVIDIA GTX/RTX, AMD RX, Intel Arc)
 
+    When ``platform == "MacIntel"`` the result is drawn from the
+    weighted Apple Silicon pool — pre-empts the cluster effect of
+    hardcoding a single chip name across every macOS profile.
+
     Args:
-        vendor_preference: "nvidia", "amd", "intel", or None for weighted random
-        rng: Random number generator (uses stdlib random if None)
+        vendor_preference: "nvidia", "amd", "intel", "apple", or None.
+        rng: Random number generator (uses stdlib random if None).
+        platform: "Win32" / "MacIntel" / "Linux x86_64".
 
     Returns:
         tuple: (vendor, renderer, device_id)
+
+    Note: the macOS path returns the chip name in the third tuple
+    slot in place of the PCI device id, since Apple Silicon has no
+    PCI vendor/device id exposed via WebGL. Callers downstream treat
+    that field opaquely (it ends up as ``webgl_param_<n>=...``).
     """
     if rng is None:
         import random as _random
         rng = _random
+
+    if platform == "MacIntel" or vendor_preference == "apple":
+        chip, _cores, _ram = pick_apple_silicon_profile(rng)
+        return GL_VENDORS["apple"], format_apple_renderer(chip), chip
 
     if vendor_preference == "nvidia":
         return rng.choice(NVIDIA_DISCRETE)

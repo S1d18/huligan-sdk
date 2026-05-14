@@ -14,6 +14,7 @@ from typing import Optional, List, Dict
 from pathlib import Path
 
 from .data import get_random_gpu, get_random_resolution, get_random_fonts, get_fingerprint_params, get_extensions
+from .data.gpu_vendors import pick_apple_silicon_profile
 
 
 @dataclass
@@ -457,14 +458,33 @@ class FingerprintGenerator:
         """
         width, height, avail_w, avail_h, dpr = get_random_resolution(self.rng)
 
+        # Default hardware spec — overridden below for MacIntel so the
+        # chip / cores / RAM stay internally consistent (fixes the
+        # cluster effect documented in CloakBrowser #236).
         cpu_cores = self.rng.choice([2, 4, 4, 6, 6, 8, 8])
         device_memory = self.rng.choice([2, 4, 8, 8, 8])
 
         max_touch_points = 0 if platform == "Win32" else self.rng.choice([0, 5, 10])
 
-        vendor, renderer, device_id = get_random_gpu(gpu_vendor_preference, self.rng)
+        if platform == "MacIntel":
+            chip, mac_cores, mac_real_ram = pick_apple_silicon_profile(self.rng)
+            vendor = "Google Inc. (Apple)"
+            renderer = f"ANGLE (Apple, ANGLE Metal Renderer: Apple {chip}, Unspecified Version)"
+            device_id = chip
+            cpu_cores = mac_cores
+            # navigator.deviceMemory caps at 8 per spec — keep the
+            # spec-visible value here; real RAM is preserved in the
+            # tuple if a future channel ever needs it.
+            device_memory = min(mac_real_ram, 8)
+        else:
+            vendor, renderer, device_id = get_random_gpu(
+                gpu_vendor_preference, self.rng, platform=platform
+            )
 
-        if "NVIDIA" in vendor:
+        if "Apple" in vendor:
+            webgpu_vendor = "apple"
+            webgpu_arch = "apple-silicon"
+        elif "NVIDIA" in vendor:
             webgpu_vendor = "nvidia"
             webgpu_arch = "ampere" if "RTX 40" in renderer or "RTX 30" in renderer else "turing"
         elif "AMD" in vendor:

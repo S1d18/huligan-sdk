@@ -19,12 +19,28 @@ Usage:
 """
 
 import json
+import logging
+import random
 import socket
 import sys
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+log = logging.getLogger("huligan.geoip")
+
+# Pre-empt the geoip-hang class of issue: keep per-attempt timeouts
+# tight enough that a slow/dead endpoint does not block browser
+# launch, and retry a few times with exponential backoff + jitter
+# before giving up to defaults.
+_ONLINE_PER_ATTEMPT_TIMEOUT = 4.0   # seconds per HTTP attempt
+_ONLINE_TOTAL_BUDGET = 12.0          # cap across all attempts
+_ONLINE_MAX_ATTEMPTS = 3
+_ONLINE_BACKOFF_BASE = 0.6
+_ONLINE_BACKOFF_JITTER = 0.4
+_DNS_TIMEOUT = 3.0                   # seconds for hostname resolution
 
 # Optional geoip2 import
 try:
@@ -208,42 +224,77 @@ class GeoIPManager:
         return self._online_lookup(ip)
 
     def _online_lookup(self, ip: str) -> GeoIPResult:
-        """Fallback lookup via ip-api.com."""
+        """
+        Fallback lookup via ip-api.com with bounded retries.
+
+        Each attempt has a short per-attempt timeout; the loop is
+        capped by a total time budget so a sustained outage cannot
+        delay browser launch indefinitely. On total failure, returns
+        a result with ``error`` set so the caller can decide whether
+        to launch without GeoIP overrides.
+        """
         result = GeoIPResult()
         result.ip = ip
         result.source = "online"
 
-        url = f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,regionName,city,lat,lon,timezone"
+        url = (
+            f"http://ip-api.com/json/{ip}"
+            "?fields=status,message,country,countryCode,regionName,city,lat,lon,timezone"
+        )
 
-        try:
-            req = urllib.request.Request(url)
-            req.add_header("User-Agent", "Huligan-GeoIP/1.0")
+        deadline = time.monotonic() + _ONLINE_TOTAL_BUDGET
+        last_error: Optional[str] = None
 
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+        for attempt in range(1, _ONLINE_MAX_ATTEMPTS + 1):
+            if time.monotonic() >= deadline:
+                last_error = "time budget exhausted before completing"
+                break
 
-            if data.get("status") == "success":
-                result.country_code = data.get("countryCode", "")
-                result.country_name = data.get("country", "")
-                result.city = data.get("city", "")
-                result.region = data.get("regionName", "")
-                result.timezone = data.get("timezone", "")
-                result.latitude = float(data.get("lat", 0))
-                result.longitude = float(data.get("lon", 0))
-                result.accuracy = 50000  # ~50km for online API
-                result.language = COUNTRY_LANGUAGE_MAP.get(
-                    result.country_code, DEFAULT_LANGUAGE
-                )
-            else:
-                result.error = data.get("message", "Unknown error")
+            try:
+                req = urllib.request.Request(url)
+                req.add_header("User-Agent", "Huligan-GeoIP/1.0")
 
-        except (urllib.error.URLError, socket.timeout) as e:
-            result.error = f"Network error: {e}"
-        except json.JSONDecodeError as e:
-            result.error = f"JSON parse error: {e}"
-        except Exception as e:
-            result.error = f"Unexpected error: {e}"
+                with urllib.request.urlopen(req, timeout=_ONLINE_PER_ATTEMPT_TIMEOUT) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
 
+                if data.get("status") == "success":
+                    result.country_code = data.get("countryCode", "")
+                    result.country_name = data.get("country", "")
+                    result.city = data.get("city", "")
+                    result.region = data.get("regionName", "")
+                    result.timezone = data.get("timezone", "")
+                    result.latitude = float(data.get("lat", 0))
+                    result.longitude = float(data.get("lon", 0))
+                    result.accuracy = 50000  # ~50km for online API
+                    result.language = COUNTRY_LANGUAGE_MAP.get(
+                        result.country_code, DEFAULT_LANGUAGE
+                    )
+                    return result
+
+                # Service returned 200 but reported failure (e.g. private IP
+                # or rate-limit). Treat as a hard error — no point retrying.
+                last_error = data.get("message", "online provider reported failure")
+                break
+
+            except (urllib.error.URLError, socket.timeout) as e:
+                last_error = f"network error: {e}"
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parse error: {e}"
+            except Exception as e:
+                last_error = f"unexpected error: {type(e).__name__}: {e}"
+
+            if attempt < _ONLINE_MAX_ATTEMPTS:
+                backoff = _ONLINE_BACKOFF_BASE * (2 ** (attempt - 1))
+                backoff += random.uniform(0, _ONLINE_BACKOFF_JITTER)
+                # Never sleep past the global deadline
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(backoff, remaining))
+                log.debug(f"GeoIP attempt {attempt} failed ({last_error}); retrying")
+
+        result.error = last_error or "online lookup failed without a specific error"
+        log.warning(f"GeoIP online lookup gave up for {ip}: {result.error}")
         return result
 
     def lookup_proxy(self, proxy_url: str) -> GeoIPResult:
@@ -273,7 +324,14 @@ class GeoIPManager:
         return proxy_str.split(":")[0]
 
     def _resolve_host(self, host: str) -> str:
-        """Resolve hostname to IP."""
+        """
+        Resolve hostname to IP under a strict timeout.
+
+        ``socket.gethostbyname`` honours the *system* DNS timeout
+        (often 30+ seconds) which would stall browser launch. We use
+        ``getaddrinfo`` with a temporary default-timeout override so
+        a slow resolver does not gate the boot.
+        """
         try:
             socket.inet_aton(host)
             return host
@@ -286,10 +344,15 @@ class GeoIPManager:
         except socket.error:
             pass
 
+        previous = socket.getdefaulttimeout()
         try:
+            socket.setdefaulttimeout(_DNS_TIMEOUT)
             return socket.gethostbyname(host)
-        except socket.gaierror:
+        except (socket.gaierror, socket.timeout) as e:
+            log.warning(f"DNS resolution for {host!r} failed: {e}")
             return host
+        finally:
+            socket.setdefaulttimeout(previous)
 
     def update_profile(self, profile_path: str, geo_result: GeoIPResult) -> bool:
         """

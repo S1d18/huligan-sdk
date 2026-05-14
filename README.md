@@ -284,3 +284,20 @@ See **[docs/BROWSER_AUTOMATION.md](docs/BROWSER_AUTOMATION.md)** for the full gu
 | `docs/QUICKSTART.md` | Getting started tutorial |
 | `docs/PROXY_LAUNCH_GUIDE.md` | Proxy setup, DNS leaks, WebRTC |
 | `docs/GEOIP_SETUP.md` | MaxMind GeoLite2 database setup |
+
+## License
+
+The Huligan SDK (this repository) is licensed under the
+**[Apache License 2.0](LICENSE)**. Third-party components retain their
+own licenses — see [`NOTICE.md`](NOTICE.md) for the full attribution
+list, including the optional GeoLite2 database (CC BY-SA 4.0).
+
+The patched Chromium **binary** that this SDK downloads from
+[`huligan-releases`](https://github.com/S1d18/huligan-releases) is
+**NOT** under Apache 2.0. It is distributed under a custom End-User
+License Agreement that prohibits redistribution and SaaS bundling.
+See the [binary EULA](https://github.com/S1d18/huligan-releases/blob/main/LICENSE.txt)
+before integrating the binary into a product you ship to others.
+
+> "Huligan" is an unregistered trademark of the Huligan Project. The
+> Apache 2.0 license does not grant trademark rights (Section 6).

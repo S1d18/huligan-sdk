@@ -2,8 +2,34 @@
 name = "huligan"
 version = "1.0.0"
 description = "Huligan Antidetect Browser SDK"
+readme = "README.md"
 requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE.md"]
+authors = [{name = "Huligan Project"}]
+keywords = ["antidetect", "browser", "chromium", "fingerprint", "automation", "stealth", "scraping", "llm-agent"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = ["tqdm>=4.65.0"]
+
+[project.urls]
+Homepage = "https://github.com/S1d18/huligan-sdk"
+Repository = "https://github.com/S1d18/huligan-sdk"
+"Binary Releases" = "https://github.com/S1d18/huligan-releases"
+Issues = "https://github.com/S1d18/huligan-sdk/issues"
 
 [project.optional-dependencies]
 playwright = ["playwright>=1.40.0"]

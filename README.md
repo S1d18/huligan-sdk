@@ -14,6 +14,7 @@ pip install huligan[all]
 pip install huligan[playwright]   # Browser automation (required for new_page())
 pip install huligan[geoip]        # Local GeoIP database (faster than API fallback)
 pip install huligan[automation]   # Human-like mouse/keyboard
+pip install huligan[captcha]      # Async wrappers for 2Captcha / AntiCaptcha / CapSolver
 ```
 
 ## How It Works
@@ -353,6 +354,64 @@ agent = HuliganAgent.from_pool([
 huligan's CDP stealth in paranoid mode (default) — see
 `docs/BROWSER_AUTOMATION.md`.
 
+### `captcha` — async wrappers for 2Captcha / AntiCaptcha / CapSolver
+
+Submit a CAPTCHA to a third-party solver and get the token back as a
+string. Supports reCAPTCHA v2/v3 (incl. Enterprise), Cloudflare
+Turnstile, hCaptcha, and image-with-text CAPTCHAs. The wrapper only
+talks to the solver API — injecting the token into the page is left
+to the caller (paranoid mode blocks `page.evaluate()`, so the
+standard trick is `await page.locator("textarea#g-recaptcha-response").fill(token)`).
+
+Install:
+
+```bash
+pip install huligan[captcha]
+```
+
+Config via env or constructor:
+
+```bash
+export HULIGAN_CAPTCHA_PROVIDER=2captcha     # or anticaptcha / capsolver
+export HULIGAN_CAPTCHA_API_KEY=your_key_here
+```
+
+```python
+import re
+from huligan import Browser, CaptchaSolver
+
+solver = CaptchaSolver.from_env()
+print(f"Balance: ${await solver.get_balance():.2f}")
+
+async with Browser(proxy="socks5://...") as b:
+    page = await b.new_page()
+    await page.goto("https://www.google.com/recaptcha/api2/demo")
+
+    # Extract sitekey from page HTML (no evaluate needed)
+    html = await page.content()
+    sitekey = re.search(r'data-sitekey=["\']([^"\']+)', html).group(1)
+
+    token = await solver.solve_recaptcha_v2(sitekey=sitekey, page_url=page.url)
+
+    # Inject and submit
+    await page.locator("textarea#g-recaptcha-response").fill(token)
+    await page.locator("button[type=submit]").first.click()
+```
+
+Other surfaces:
+
+```python
+await solver.solve_recaptcha_v3(sitekey, page_url, action="login", min_score=0.7)
+await solver.solve_turnstile(sitekey, page_url)
+await solver.solve_hcaptcha(sitekey, page_url)
+await solver.solve_image(png_bytes, instructions="Type the visible numbers")
+```
+
+Per-call `timeout=` (default 120s) and `poll_interval=` (default 5s)
+override the constructor defaults. Solver errors and timeouts raise
+`CaptchaSolveError`. See `examples/example_captcha.py` for the full
+flow against the official reCAPTCHA demo page.
+
 ### `automation`
 
 Behavioural helpers split across modules. Mouse/keyboard need the
@@ -426,6 +485,7 @@ See `examples/` directory:
 | `example_fingerprint_check.py` | Verify fingerprint on browserscan.net |
 | `example_scraping_pagination.py` | Scrape with pagination and error handling |
 | `example_markdown.py` | HTML → Markdown for LLM consumption |
+| `example_captcha.py` | Solve reCAPTCHA / Turnstile / hCaptcha via 2Captcha / AntiCaptcha / CapSolver |
 | `agents/example_basic_scrape.py` | High-level scraping pool (single browser) |
 | `agents/example_pool.py` | Round-robin across multiple identities |
 

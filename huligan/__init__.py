@@ -54,6 +54,14 @@ try:
 except ImportError:
     pass
 
+# CAPTCHA solver wrappers — requires huligan[captcha]
+_HAS_CAPTCHA = False
+try:
+    from .captcha import CaptchaSolver, CaptchaSolveError
+    from .captcha import _AVAILABLE as _HAS_CAPTCHA
+except ImportError:
+    pass
+
 __version__ = "1.0.0"
 __all__ = [
     "Browser",
@@ -77,3 +85,5 @@ if _HAS_AGENTS:
     __all__ += ["HuliganBrowserPlugin", "HuliganBrowserController", "HuliganAgent"]
 if _HAS_MARKDOWN:
     __all__ += ["extract_markdown", "MarkdownExtractor"]
+if _HAS_CAPTCHA:
+    __all__ += ["CaptchaSolver", "CaptchaSolveError"]

@@ -109,6 +109,17 @@ class FingerprintProfile:
     # Browser.start() forwards this as HULIGAN_CDP_MODE env var.
     cdp_mode: str = "paranoid"
 
+    # WebRTC spoof — values written into ICE candidates by the C++
+    # patch in third_party/webrtc/p2p/base/port.cc (see huligan-browser
+    # patches/chromium/11a_webrtc_spoof.py). When non-empty, page JS
+    # observes these as the local addresses in RTCIceCandidate.
+    # Browser.start() auto-fills webrtc_local_ipv4 from the proxy exit
+    # IP detected via huligan.proxy.detect_exit_ip(); manual values
+    # set on the profile take precedence. Leave empty to pass that
+    # IP family through unchanged.
+    webrtc_local_ipv4: str = ""
+    webrtc_local_ipv6: str = ""
+
     # WebGL parameters (GL enum -> value, auto-populated from GPU)
     webgl_params: Dict[int, object] = field(default_factory=dict)
 
@@ -366,9 +377,17 @@ class FingerprintProfile:
         lines.append("webgpu_enabled=1")
         lines.append("")
 
-        # WebRTC blocking
+        # WebRTC
         lines.append("# WebRTC")
+        # Legacy gate kept for the C++ side. When webrtc_local_ipv4 /
+        # webrtc_local_ipv6 are populated the patched binary spoofs
+        # the candidate IP instead of refusing to gather candidates;
+        # an empty value means the candidate is passed through as-is.
         lines.append("webrtc_block=1")
+        if self.webrtc_local_ipv4:
+            lines.append(f"webrtc_local_ipv4={self.webrtc_local_ipv4}")
+        if self.webrtc_local_ipv6:
+            lines.append(f"webrtc_local_ipv6={self.webrtc_local_ipv6}")
         lines.append("")
 
         return '\n'.join(lines)

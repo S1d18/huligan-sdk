@@ -43,7 +43,7 @@ from typing import Optional, Union
 from .chrome import find_chrome
 from .fingerprint import FingerprintGenerator, FingerprintProfile
 from .geoip import GeoIPManager, GeoIPResult
-from .proxy import ProxyForwarder, parse_proxy_string
+from .proxy import ProxyForwarder, parse_proxy_string, detect_exit_ip
 
 log = logging.getLogger("huligan.browser")
 
@@ -170,6 +170,36 @@ class Browser:
             except Exception as e:
                 log.warning(f"GeoIP failed: {e}")
 
+        # 4b. WebRTC exit-IP probe.
+        # Auto-fill webrtc_local_ipv4 from the proxy's public address
+        # so the C++ patch in third_party/webrtc/p2p/base/port.cc can
+        # rewrite ICE candidates to the same value page JS would see
+        # via getStats(). Skipped if the profile already carries an
+        # explicit value, or if there is no proxy (no exit to detect).
+        self._webrtc_spoof_ip: Optional[str] = None
+        if self._proxy_info:
+            existing = ""
+            if self._profile is not None:
+                existing = getattr(self._profile, "webrtc_local_ipv4", "") or ""
+            if not existing:
+                exit_ip = detect_exit_ip(self._proxy_info, timeout=4.0)
+                if exit_ip:
+                    self._webrtc_spoof_ip = exit_ip
+                    if self._profile is not None:
+                        self._profile.webrtc_local_ipv4 = exit_ip
+                        # Rewrite the temp .conf with the freshly
+                        # detected value before Chrome opens it.
+                        if self._temp_profile is not None:
+                            self._temp_profile.write_text(
+                                self._profile.to_conf(), encoding="utf-8"
+                            )
+                    log.info(f"WebRTC spoof IPv4: {exit_ip}")
+                else:
+                    log.info("WebRTC exit-IP probe yielded no result; spoof disabled")
+            else:
+                self._webrtc_spoof_ip = existing
+                log.info(f"WebRTC spoof IPv4: {existing} (from profile)")
+
         # 5. Update .conf with timezone/language
         timezone = self._timezone_override
         language = self._language_override
@@ -231,7 +261,14 @@ class Browser:
             chrome_args.append(
                 f"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE {proxy_ip}"
             )
-            chrome_args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+            # When WebRTC spoof IP is wired into the .conf, let the
+            # patched binary gather candidates and rewrite their IP at
+            # the source (port.cc). Without a spoof IP, fall back to
+            # the older blanket-disable flag — disabled WebRTC is its
+            # own fingerprint signal (<1% of real users), but it is
+            # still better than leaking the real local IP unmasked.
+            if not self._webrtc_spoof_ip:
+                chrome_args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
             chrome_args.append("--enforce-webrtc-ip-permission-check")
 
         # Language from GeoIP

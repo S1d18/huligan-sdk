@@ -306,6 +306,204 @@ class ProxyForwarder:
             t2.cancel()
 
 
+def detect_exit_ip(proxy_info: dict, timeout: float = 4.0) -> Optional[str]:
+    """
+    Discover the public IPv4 the upstream proxy will present to remote
+    sites. Used to populate ``FingerprintProfile.webrtc_local_ipv4`` so
+    the WebRTC C++ patch can spoof the same value into ICE candidates.
+
+    Synchronous because the call sits in ``Browser.start()`` before
+    Chrome is launched — adds at most ``timeout`` seconds (default 4)
+    to boot, fails open: returns ``None`` on any network error and the
+    caller skips the spoof for that family.
+
+    Supports SOCKS5 (with or without user/pass) and HTTP CONNECT
+    upstreams; same matrix as ``ProxyForwarder``. The probe hits
+    ``ifconfig.me`` which returns a single plain-text IPv4 line.
+    """
+    if not proxy_info or not proxy_info.get("host"):
+        return None
+    upstream_type = (proxy_info.get("type") or "socks5").lower()
+    host = proxy_info["host"]
+    port = int(proxy_info["port"])
+    user = proxy_info.get("user") or ""
+    password = proxy_info.get("password") or ""
+
+    try:
+        if upstream_type in ("socks5", "socks5h"):
+            return _detect_via_socks5(host, port, user, password, timeout)
+        if upstream_type in ("http", "https"):
+            return _detect_via_http_connect(host, port, user, password, timeout)
+    except (OSError, socket.timeout, ValueError) as e:
+        log.warning(f"detect_exit_ip failed via {upstream_type}://{host}:{port} — {e}")
+        return None
+    log.warning(f"detect_exit_ip: unsupported upstream type {upstream_type!r}")
+    return None
+
+
+_PROBE_HOST = "ifconfig.me"
+_PROBE_REQUEST = (
+    "GET /ip HTTP/1.1\r\n"
+    "Host: ifconfig.me\r\n"
+    "User-Agent: huligan/exit-ip-probe\r\n"
+    "Accept: text/plain\r\n"
+    "Connection: close\r\n\r\n"
+).encode("ascii")
+
+
+def _read_until_close(s: socket.socket, deadline: float) -> bytes:
+    chunks = []
+    while True:
+        remaining = deadline - asyncio.get_event_loop().time() if False else None
+        try:
+            data = s.recv(4096)
+        except socket.timeout:
+            break
+        if not data:
+            break
+        chunks.append(data)
+        if len(b"".join(chunks)) > 8192:
+            break  # response is tiny — anything larger is malformed
+    return b"".join(chunks)
+
+
+def _extract_ip_from_http(response: bytes) -> Optional[str]:
+    if b"\r\n\r\n" not in response:
+        return None
+    body = response.split(b"\r\n\r\n", 1)[1].strip()
+    text = body.decode("ascii", errors="ignore").strip()
+    # ifconfig.me /ip returns just "1.2.3.4\n"
+    parts = text.split()
+    if not parts:
+        return None
+    ip = parts[0]
+    # Cheap sanity-check — IPv4 dotted-quad
+    octets = ip.split(".")
+    if len(octets) != 4:
+        return None
+    try:
+        if not all(0 <= int(o) <= 255 for o in octets):
+            return None
+    except ValueError:
+        return None
+    return ip
+
+
+def _detect_via_socks5(host: str, port: int, user: str, password: str,
+                       timeout: float) -> Optional[str]:
+    s = socket.create_connection((host, port), timeout=timeout)
+    s.settimeout(timeout)
+    try:
+        # Greeting: SOCKS5, offer no-auth + user/pass if creds present.
+        if user:
+            s.sendall(b"\x05\x02\x00\x02")
+        else:
+            s.sendall(b"\x05\x01\x00")
+        reply = s.recv(2)
+        if len(reply) != 2 or reply[0] != 0x05:
+            return None
+        method = reply[1]
+        if method == 0xFF:
+            return None  # no acceptable method
+        if method == 0x02:
+            if not user:
+                return None
+            u, p = user.encode("utf-8"), password.encode("utf-8")
+            s.sendall(b"\x01" + bytes([len(u)]) + u + bytes([len(p)]) + p)
+            auth_reply = s.recv(2)
+            if len(auth_reply) != 2 or auth_reply[1] != 0x00:
+                return None
+
+        # CONNECT to ifconfig.me:80 via domain (SOCKS5 ATYP=0x03)
+        host_bytes = _PROBE_HOST.encode("ascii")
+        request = (
+            b"\x05\x01\x00\x03"
+            + bytes([len(host_bytes)])
+            + host_bytes
+            + (80).to_bytes(2, "big")
+        )
+        s.sendall(request)
+        # Reply header is variable-length; read the fixed 4 bytes then skip BND
+        head = s.recv(4)
+        if len(head) != 4 or head[1] != 0x00:
+            return None
+        atyp = head[3]
+        if atyp == 0x01:
+            s.recv(4 + 2)
+        elif atyp == 0x03:
+            ln = s.recv(1)
+            s.recv(ln[0] + 2)
+        elif atyp == 0x04:
+            s.recv(16 + 2)
+        else:
+            return None
+
+        s.sendall(_PROBE_REQUEST)
+        response = b""
+        while True:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            response += chunk
+            if len(response) > 8192:
+                break
+        return _extract_ip_from_http(response)
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
+def _detect_via_http_connect(host: str, port: int, user: str, password: str,
+                              timeout: float) -> Optional[str]:
+    s = socket.create_connection((host, port), timeout=timeout)
+    s.settimeout(timeout)
+    try:
+        connect = f"CONNECT {_PROBE_HOST}:80 HTTP/1.1\r\nHost: {_PROBE_HOST}:80\r\n"
+        if user:
+            creds = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+            connect += f"Proxy-Authorization: Basic {creds}\r\n"
+        connect += "Connection: keep-alive\r\n\r\n"
+        s.sendall(connect.encode("ascii"))
+        head = b""
+        while b"\r\n\r\n" not in head:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                return None
+            if not chunk:
+                return None
+            head += chunk
+            if len(head) > 4096:
+                return None
+        status_line = head.split(b"\r\n", 1)[0]
+        if b" 200 " not in status_line:
+            return None
+
+        s.sendall(_PROBE_REQUEST)
+        response = b""
+        while True:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            response += chunk
+            if len(response) > 8192:
+                break
+        return _extract_ip_from_http(response)
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
 def parse_proxy_string(proxy_str: str) -> dict:
     """
     Parse proxy string in various formats.

@@ -265,6 +265,16 @@ class Browser:
         if timezone:
             env["TZ"] = timezone
 
+        # CDP mode: read from .conf if not already overridden in
+        # os.environ, then forward to Chrome. Browser-side defaults
+        # to "paranoid" if unset or invalid. The C++ patch checks the
+        # env var at the call sites that gate Runtime/Console/Debugger
+        # evaluate-surface suppression — see huligan-browser/patches/
+        # chromium/05_cdp_stealth.py (v2).
+        cdp_mode = self._cdp_mode_from_conf(self._profile_path)
+        if cdp_mode and not env.get("HULIGAN_CDP_MODE"):
+            env["HULIGAN_CDP_MODE"] = cdp_mode
+
         # 10. Launch Chrome
         self._process = subprocess.Popen(chrome_args, env=env)
         log.info(f"Chrome started (PID: {self._process.pid}, CDP: {self._cdp_port})")
@@ -273,6 +283,35 @@ class Browser:
         await self._wait_for_cdp()
 
         return self
+
+    @staticmethod
+    def _cdp_mode_from_conf(profile_path) -> Optional[str]:
+        """
+        Read ``cdp_mode`` from a .conf file. Returns ``"paranoid"`` or
+        ``"isolated"`` if a valid value is found, else ``None`` (the
+        caller then keeps any env-var the operator already set).
+
+        Cheap line scan — .conf files are short and the key sits near
+        the bottom. We deliberately avoid parsing the whole file with
+        the Profile dataclass to keep this hot-path dependency-free.
+        """
+        if not profile_path:
+            return None
+        try:
+            with open(profile_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    if key.strip() == "cdp_mode":
+                        value = value.strip().lower()
+                        if value in ("paranoid", "isolated"):
+                            return value
+                        return None
+        except OSError:
+            return None
+        return None
 
     async def new_page(self):
         """

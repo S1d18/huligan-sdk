@@ -99,6 +99,16 @@ class FingerprintProfile:
     block_port_scan: bool = True
     history_length_min: int = 2
 
+    # CDP stealth mode. "paranoid" (default) blocks Runtime.enable /
+    # Console.enable / Debugger.enable evaluate surfaces so page JS
+    # cannot detect CDP; page.evaluate is effectively unusable.
+    # "isolated" disables those three suppressions so the upstream
+    # agents framework / Playwright can drive Runtime.evaluate
+    # normally, while every other CDP hardening (json endpoint
+    # hiding, screenX/Y fix, stack-trace filter, etc.) stays on.
+    # Browser.start() forwards this as HULIGAN_CDP_MODE env var.
+    cdp_mode: str = "paranoid"
+
     # WebGL parameters (GL enum -> value, auto-populated from GPU)
     webgl_params: Dict[int, object] = field(default_factory=dict)
 
@@ -333,6 +343,8 @@ class FingerprintProfile:
 
         # CDP Stealth (always enabled)
         lines.append("# CDP Stealth")
+        cdp_mode = self.cdp_mode if self.cdp_mode in ("paranoid", "isolated") else "paranoid"
+        lines.append(f"cdp_mode={cdp_mode}")
         lines.append("cdp_stealth=1")
         lines.append("cdp_hide_json_endpoint=1")
         lines.append("cdp_filter_stack_traces=1")

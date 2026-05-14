@@ -7,6 +7,7 @@ import math
 import random
 import hashlib
 import json
+import secrets
 import time
 from dataclasses import dataclass, asdict, field
 from typing import Optional, List, Dict
@@ -136,6 +137,73 @@ class FingerprintProfile:
             platform=platform,
             gpu_vendor_preference=gpu_vendor_preference,
         )
+
+    @classmethod
+    def template(
+        cls,
+        name: str,
+        seed: Optional[int] = None,
+    ) -> "FingerprintProfile":
+        """
+        Build a profile from a curated named preset.
+
+        Combines ``from_seed`` (for the random-but-deterministic fields:
+        fonts, noise seeds, media-device IDs, etc.) with template-specific
+        overrides (timezone, GPU, screen, language, hardware specs).
+
+        ``audio_noise_seed=0`` is preserved by the underlying ``from_seed``
+        contract — templates never touch it.
+
+        Args:
+            name: Template key. See ``huligan.templates.TEMPLATES`` or
+                ``huligan.templates.list_templates()``.
+            seed: Optional deterministic seed. ``None`` draws a random
+                64-bit value so each call produces a distinct identity
+                under the same template.
+
+        Returns:
+            FingerprintProfile with template overrides applied.
+
+        Raises:
+            KeyError: If ``name`` is not a known template.
+
+        Example:
+            >>> p = FingerprintProfile.template("usa_verified_facebook", seed=42)
+            >>> p.timezone
+            'America/New_York'
+        """
+        # Local import keeps templates as an optional, low-coupling module.
+        from .templates import TEMPLATES
+
+        if name not in TEMPLATES:
+            available = ", ".join(sorted(TEMPLATES))
+            raise KeyError(
+                f"Unknown template {name!r}. Available templates: {available}"
+            )
+
+        if seed is None:
+            seed = secrets.randbits(64)
+
+        spec = TEMPLATES[name]
+        profile = cls.from_seed(seed, **spec.get("from_seed_kwargs", {}))
+
+        overrides = spec.get("overrides", {})
+        for attr, value in overrides.items():
+            if not hasattr(profile, attr):
+                raise AttributeError(
+                    f"Template {name!r} sets unknown attribute {attr!r}"
+                )
+            setattr(profile, attr, value)
+
+        # WebGL params / extensions are derived from the renderer string.
+        # When a template overrides the renderer, refresh both so the
+        # profile stays internally consistent.
+        if "webgl_renderer" in overrides:
+            profile.webgl_params = get_fingerprint_params(profile.webgl_renderer)
+            profile.webgl_extensions = get_extensions(profile.webgl_renderer, webgl_version=1)
+            profile.webgl2_extensions = get_extensions(profile.webgl_renderer, webgl_version=2)
+
+        return profile
 
     def to_conf(self) -> str:
         """Convert to .conf file format"""

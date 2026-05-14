@@ -35,7 +35,20 @@ Issues = "https://github.com/S1d18/huligan-sdk/issues"
 playwright = ["playwright>=1.40.0"]
 geoip = ["geoip2>=2.9.0"]
 automation = ["pytweening>=1.0.4", "loguru>=0.7.0"]
-all = ["playwright>=1.40.0", "geoip2>=2.9.0", "pytweening>=1.0.4", "loguru>=0.7.0"]
+# The agents extra installs only playwright; the upstream agents
+# framework runtime is fetched separately via
+# `huligan.agents._runtime.setup_runtime()` so that its identity is
+# not baked into our dependency graph.
+agents = ["playwright>=1.40.0"]
+markdown = ["trafilatura>=2.0", "markdownify>=0.11"]
+all = [
+    "playwright>=1.40.0",
+    "geoip2>=2.9.0",
+    "pytweening>=1.0.4",
+    "loguru>=0.7.0",
+    "trafilatura>=2.0",
+    "markdownify>=0.11",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]

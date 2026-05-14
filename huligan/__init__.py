@@ -36,6 +36,24 @@ try:
 except ImportError:
     pass  # Needs only playwright; should always succeed if huligan[playwright] is installed
 
+# Agents / scraping pool — requires huligan[agents]
+_HAS_AGENTS = False
+try:
+    from .agents import HuliganBrowserPlugin, HuliganBrowserController, HuliganAgent
+    # Only mark available if the import didn't fall back to the
+    # `_missing` stub inside agents/__init__.py.
+    from .agents import _AVAILABLE as _HAS_AGENTS
+except ImportError:
+    pass
+
+# HTML → Markdown for LLM agents — requires huligan[markdown]
+_HAS_MARKDOWN = False
+try:
+    from .markdown import extract_markdown, MarkdownExtractor
+    from .markdown import _AVAILABLE as _HAS_MARKDOWN
+except ImportError:
+    pass
+
 __version__ = "1.0.0"
 __all__ = [
     "Browser",
@@ -55,3 +73,7 @@ if _HAS_SCROLL_IDLE:
         "human_like_scroll", "human_like_scroll_to_top",
         "idle_mouse_movement", "simulated_reading_pause",
     ]
+if _HAS_AGENTS:
+    __all__ += ["HuliganBrowserPlugin", "HuliganBrowserController", "HuliganAgent"]
+if _HAS_MARKDOWN:
+    __all__ += ["extract_markdown", "MarkdownExtractor"]

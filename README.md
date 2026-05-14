@@ -101,6 +101,38 @@ profile.connection_effective_type = "3g"
 Path("my_profile.conf").write_text(profile.to_conf())
 ```
 
+### Profile templates
+
+For non-power users who want a realistic identity in one line, six
+curated presets bundle GPU + screen + locale + timezone + hardware
+specs that look plausible together:
+
+```python
+from huligan import FingerprintProfile
+
+# Deterministic: same template + same seed → identical profile.
+p = FingerprintProfile.template("usa_verified_facebook", seed=42)
+# Omit `seed` to draw a fresh random 64-bit seed each call.
+p = FingerprintProfile.template("macos_developer")
+```
+
+Available templates:
+
+```python
+from huligan.templates import list_templates
+for name, desc in list_templates():
+    print(f"{name}: {desc}")
+# usa_verified_facebook: US Windows desktop, NVIDIA RTX 3060, 1920x1080, en-US, ...
+# usa_office_chrome:     US office worker, Intel UHD 770, 1920x1080, en-US, ...
+# eu_mobile_twitter:     EU mid-range laptop (Win32, Intel Iris Xe), 1536x864, de-DE, ...
+# apac_crypto_exchange:  APAC gaming workstation, NVIDIA RTX 3070, 2560x1440, en-US, ...
+# latam_casual_browsing: LatAm modest hardware, AMD RX 5600 XT, 1366x768, es-MX, ...
+# macos_developer:       macOS dev box, Apple M2, 2560x1440 @2x, en-US, ...
+```
+
+Templates preserve `audio_noise_seed=0` and stay internally consistent
+(WebGL params/extensions are recomputed from the overridden renderer).
+
 ### Without proxy (local testing)
 
 ```python
@@ -234,6 +266,93 @@ print(result.timezone, result.language, result.country_name)
 manager.close()
 ```
 
+### `markdown` — HTML → Markdown for LLM agents
+
+Pulls a page's HTML through `page.content()` (paranoid-mode safe — no
+`page.evaluate()` needed) and converts it to clean Markdown using
+readability filtering. Primary engine is `trafilatura` (strips
+boilerplate like nav/ads/footers); falls back to `markdownify` for SPA
+shells or very short documents.
+
+Install:
+
+```bash
+pip install huligan[markdown]
+```
+
+```python
+from huligan import Browser, extract_markdown
+
+async with Browser(proxy="socks5://...") as b:
+    page = await b.new_page()
+    await page.goto("https://en.wikipedia.org/wiki/Web_scraping")
+    md = await extract_markdown(page, include_images=False)
+    print(md)
+```
+
+Or reuse on raw HTML:
+
+```python
+from huligan import MarkdownExtractor
+
+ext = MarkdownExtractor(strategy="trafilatura", include_links=True)
+md = ext.from_html(html_string, base_url="https://example.com")
+```
+
+### `agents` — high-level scraping pool / LLM-agent runner
+
+Run a high-level scraping framework on top of huligan's patched
+Chromium. Same browser as manual antidetect work, but with a built-in
+request queue, session pool, proxy rotation, and dataset storage.
+Useful for both classical scraping pipelines and LLM browser agents
+(Stagehand, browser-use, and similar AI agent frameworks).
+
+Install (two steps — the upstream runtime is fetched dynamically so
+it is not part of huligan's dependency graph):
+
+```bash
+pip install huligan[agents]
+python -c "from huligan.agents._runtime import setup_runtime; setup_runtime()"
+```
+
+Single-fingerprint usage:
+
+```python
+import asyncio
+from huligan.agents import HuliganAgent
+
+async def main():
+    agent = HuliganAgent(
+        proxy="socks5://user:pass@host:port",
+        fingerprint_seed=42,         # deterministic profile from a seed
+        headless=True,
+    )
+
+    @agent.router.default_handler
+    async def handler(context):
+        await context.enqueue_links(selector=".titleline > a", limit=5)
+        await context.push_data({"url": context.request.url})
+
+    await agent.run(["https://news.ycombinator.com"])
+    await agent.export_data("scraped.json")
+
+asyncio.run(main())
+```
+
+Pool of distinct identities:
+
+```python
+agent = HuliganAgent.from_pool([
+    {"proxy": "socks5://p1...", "fingerprint_seed": 1},
+    {"proxy": "socks5://p2...", "fingerprint_seed": 2},
+    {"proxy": "socks5://p3...", "fingerprint_seed": 3},
+])
+```
+
+`page.locator()` works as usual; `page.evaluate()` is blocked by
+huligan's CDP stealth in paranoid mode (default) — see
+`docs/BROWSER_AUTOMATION.md`.
+
 ### `automation`
 
 Behavioural helpers split across modules. Mouse/keyboard need the
@@ -285,6 +404,7 @@ See `examples/` directory:
 | `example_with_proxy.py` | Full proxy chain with GeoIP info |
 | `example_no_proxy.py` | Local testing without proxy |
 | `example_from_seed.py` | One-line profile factory: `FingerprintProfile.from_seed(N)` |
+| `example_template.py` | Named presets: `FingerprintProfile.template("usa_verified_facebook")` |
 | `example_custom_fingerprint.py` | Reproducible seed-based profile (Generator API) |
 
 **Multi-account & scaling:**
@@ -305,6 +425,9 @@ See `examples/` directory:
 | `example_cloudflare_turnstile.py` | Cloudflare bypass with retry logic |
 | `example_fingerprint_check.py` | Verify fingerprint on browserscan.net |
 | `example_scraping_pagination.py` | Scrape with pagination and error handling |
+| `example_markdown.py` | HTML → Markdown for LLM consumption |
+| `agents/example_basic_scrape.py` | High-level scraping pool (single browser) |
+| `agents/example_pool.py` | Round-robin across multiple identities |
 
 ## Important: Browser Automation Limitations
 

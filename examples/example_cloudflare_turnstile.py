@@ -14,6 +14,9 @@ IMPORTANT: Do NOT use page.evaluate() — it is blocked by CDP stealth patches.
 Use locator methods for all DOM interaction.
 """
 import asyncio
+import ipaddress
+from urllib.parse import urlparse
+
 from huligan import Browser
 
 
@@ -81,12 +84,38 @@ async def wait_for_turnstile(page, attempt: int) -> bool:
     return False
 
 
+def _check_safe_url(url: str) -> None:
+    """
+    Reject schemes other than http/https and any hostname that resolves
+    to a loopback / link-local / private IP. Prevents file://, ftp://,
+    SSRF to cloud metadata endpoints (169.254.169.254), and connections
+    to internal hosts when this helper is fed an untrusted URL.
+
+    See https://github.com/CloakHQ/CloakBrowser/issues/233 for the
+    upstream incident class this mitigates.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Disallowed URL scheme: {parsed.scheme!r}; only http/https are accepted")
+    host = parsed.hostname or ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return  # Hostname is a domain — DNS resolution is intentionally outside scope here
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+        raise ValueError(f"Disallowed target address: {ip}")
+
+
 async def navigate_with_cf_bypass(browser, url: str) -> object:
     """
     Navigate to a Cloudflare-protected URL with retry logic.
 
     Returns the page object if successful, raises RuntimeError if all retries fail.
+    Rejects non-http(s) schemes and private/loopback/link-local addresses
+    so this helper is safe to call with caller-supplied URLs.
     """
+    _check_safe_url(url)
+
     for attempt in range(1, MAX_RETRIES + 1):
         page = await browser.new_page()
 

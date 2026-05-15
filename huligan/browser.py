@@ -43,7 +43,12 @@ from typing import Optional, Union
 from .chrome import find_chrome
 from .fingerprint import FingerprintGenerator, FingerprintProfile
 from .geoip import GeoIPManager, GeoIPResult
-from .proxy import ProxyForwarder, parse_proxy_string, detect_exit_ip
+from .proxy import (
+    ProxyForwarder,
+    parse_proxy_string,
+    detect_exit_ip,
+    detect_local_public_ip,
+)
 
 log = logging.getLogger("huligan.browser")
 
@@ -156,11 +161,32 @@ class Browser:
             self._profile_path = self._temp_profile
             log.info(f"Generated profile: {self._profile_path}")
 
-        # 4. GeoIP lookup
-        if self._proxy_info and not self._timezone_override:
+        # 4. GeoIP lookup.
+        # Resolution strategy:
+        #   - With proxy: GeoIP the proxy host (presents location of the
+        #     exit IP to remote sites, which is what we want to match).
+        #   - Without proxy: the machine *is* the exit. Probe the local
+        #     public IP and GeoIP that — otherwise timezone/languages
+        #     fall back to whatever the .conf default carries, which
+        #     mismatches the IP the page actually sees (a strong bot
+        #     signal: "IP says Moscow but Accept-Language is en-US").
+        # User overrides (timezone / language kwargs) skip the lookup
+        # for that field but the IP-probe still runs so 4b can spoof.
+        public_ip_for_geo: Optional[str] = None
+        if self._proxy_info:
+            public_ip_for_geo = self._proxy_info["host"]
+        else:
+            try:
+                public_ip_for_geo = detect_local_public_ip(timeout=4.0)
+                if public_ip_for_geo:
+                    log.info(f"No proxy — resolved local public IP for GeoIP: {public_ip_for_geo}")
+            except Exception as e:
+                log.warning(f"Local public IP probe failed: {e}")
+
+        if public_ip_for_geo and not self._timezone_override:
             try:
                 manager = GeoIPManager()
-                self._geo = manager.lookup(self._proxy_info["host"])
+                self._geo = manager.lookup(public_ip_for_geo)
                 manager.close()
                 if self._geo.error:
                     log.warning(f"GeoIP error: {self._geo.error}")
@@ -170,35 +196,42 @@ class Browser:
             except Exception as e:
                 log.warning(f"GeoIP failed: {e}")
 
-        # 4b. WebRTC exit-IP probe.
-        # Auto-fill webrtc_local_ipv4 from the proxy's public address
-        # so the C++ patch in third_party/webrtc/p2p/base/port.cc can
-        # rewrite ICE candidates to the same value page JS would see
-        # via getStats(). Skipped if the profile already carries an
-        # explicit value, or if there is no proxy (no exit to detect).
+        # 4b. WebRTC local-IP spoof.
+        # With proxy: spoof to the proxy's exit IP (matches what page JS
+        # observes through any non-WebRTC channel). Without proxy: spoof
+        # to the machine's own public IP — prevents the LAN-IP leak
+        # (192.168.x.x / 10.x.x.x) WebRTC otherwise gathers as host
+        # candidates. Profile-supplied value always wins.
         self._webrtc_spoof_ip: Optional[str] = None
-        if self._proxy_info:
-            existing = ""
-            if self._profile is not None:
-                existing = getattr(self._profile, "webrtc_local_ipv4", "") or ""
-            if not existing:
-                exit_ip = detect_exit_ip(self._proxy_info, timeout=4.0)
-                if exit_ip:
-                    self._webrtc_spoof_ip = exit_ip
-                    if self._profile is not None:
-                        self._profile.webrtc_local_ipv4 = exit_ip
-                        # Rewrite the temp .conf with the freshly
-                        # detected value before Chrome opens it.
-                        if self._temp_profile is not None:
-                            self._temp_profile.write_text(
-                                self._profile.to_conf(), encoding="utf-8"
-                            )
-                    log.info(f"WebRTC spoof IPv4: {exit_ip}")
-                else:
-                    log.info("WebRTC exit-IP probe yielded no result; spoof disabled")
+        existing = ""
+        if self._profile is not None:
+            existing = getattr(self._profile, "webrtc_local_ipv4", "") or ""
+        if existing:
+            self._webrtc_spoof_ip = existing
+            log.info(f"WebRTC spoof IPv4: {existing} (from profile)")
+        elif self._proxy_info:
+            exit_ip = detect_exit_ip(self._proxy_info, timeout=4.0)
+            if exit_ip:
+                self._webrtc_spoof_ip = exit_ip
+                log.info(f"WebRTC spoof IPv4: {exit_ip}")
             else:
-                self._webrtc_spoof_ip = existing
-                log.info(f"WebRTC spoof IPv4: {existing} (from profile)")
+                log.info("WebRTC exit-IP probe yielded no result; spoof disabled")
+        elif public_ip_for_geo:
+            self._webrtc_spoof_ip = public_ip_for_geo
+            log.info(f"WebRTC spoof IPv4: {public_ip_for_geo} (local public)")
+
+        if (
+            self._webrtc_spoof_ip
+            and not existing
+            and self._profile is not None
+        ):
+            self._profile.webrtc_local_ipv4 = self._webrtc_spoof_ip
+            # Rewrite the temp .conf with the freshly detected value
+            # before Chrome opens it.
+            if self._temp_profile is not None:
+                self._temp_profile.write_text(
+                    self._profile.to_conf(), encoding="utf-8"
+                )
 
         # 5. Update .conf with timezone/language
         timezone = self._timezone_override

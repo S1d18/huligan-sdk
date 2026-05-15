@@ -504,6 +504,46 @@ def _detect_via_http_connect(host: str, port: int, user: str, password: str,
             pass
 
 
+def detect_local_public_ip(timeout: float = 4.0) -> Optional[str]:
+    """
+    Discover the machine's own public IPv4 (no proxy in the path).
+
+    Used by ``Browser.start()`` when the operator launches without a
+    proxy so the SDK can still GeoIP-resolve timezone/language and
+    pre-fill ``webrtc_local_ipv4`` (preventing the LAN-IP leak that
+    WebRTC otherwise surfaces).
+
+    Direct TCP to ``ifconfig.me:80`` — same probe used by
+    ``detect_exit_ip``, just without a proxy in front. Fails open:
+    returns ``None`` on any error.
+    """
+    try:
+        s = socket.create_connection((_PROBE_HOST, 80), timeout=timeout)
+        s.settimeout(timeout)
+        try:
+            s.sendall(_PROBE_REQUEST)
+            response = b""
+            while True:
+                try:
+                    chunk = s.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                response += chunk
+                if len(response) > 8192:
+                    break
+            return _extract_ip_from_http(response)
+        finally:
+            try:
+                s.close()
+            except OSError:
+                pass
+    except (OSError, socket.timeout, ValueError) as e:
+        log.debug(f"detect_local_public_ip failed: {e}")
+        return None
+
+
 def parse_proxy_string(proxy_str: str) -> dict:
     """
     Parse proxy string in various formats.

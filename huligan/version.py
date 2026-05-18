@@ -9,7 +9,7 @@ from the public binary mirror.
 # Internal build counter — bumped whenever the SDK is republished against
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
-BUILD_NUMBER = 1
+BUILD_NUMBER = 2
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "148.0.7778.97"

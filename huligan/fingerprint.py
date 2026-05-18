@@ -56,6 +56,16 @@ class FingerprintProfile:
     # Audio noise — disabled: BrowserScan detects noise as modified manually
     audio_noise_seed: int = 0
 
+    # Canvas noise — OPT-IN. Default False = stable native canvas
+    # (Dolphin-parity): zero tampering signal, but canvas is a stable
+    # cross-site fingerprint shared across profiles on the same host.
+    # Set True only when you need per-profile canvas unlinkability — the
+    # C++ patch then applies the v2 sparse algorithm (<=10 pixels, stays
+    # clean on BrowserScan). canvas_noise_seed is always populated
+    # regardless (it also seeds media-device IDs); this flag only gates
+    # whether the browser actually perturbs the canvas.
+    canvas_noise_enabled: bool = False
+
     # Screen (optional fields with defaults)
     color_depth: int = 24
     device_pixel_ratio: float = 1.0
@@ -164,6 +174,7 @@ class FingerprintProfile:
         *,
         platform: str = "Win32",
         gpu_vendor_preference: Optional[str] = None,
+        canvas_noise: bool = False,
     ) -> "FingerprintProfile":
         """
         Build a deterministic profile from a single integer seed.
@@ -192,6 +203,7 @@ class FingerprintProfile:
         return FingerprintGenerator(seed=seed).generate(
             platform=platform,
             gpu_vendor_preference=gpu_vendor_preference,
+            canvas_noise=canvas_noise,
         )
 
     @classmethod
@@ -342,7 +354,7 @@ class FingerprintProfile:
         # Noise
         lines.append("# Noise Seeds")
         lines.append(f"canvas_noise_seed={self.canvas_noise_seed}")
-        lines.append(f"canvas_noise_enabled=true")
+        lines.append(f"canvas_noise_enabled={'true' if self.canvas_noise_enabled else 'false'}")
         lines.append(f"audio_noise_seed=0")  # Disabled: BrowserScan detects audio noise as "modified manually"
         lines.append(f"font_noise_seed={self.font_noise_seed}")
         lines.append(f"client_rects_noise_seed={self.client_rects_noise_seed}")
@@ -487,7 +499,7 @@ class FingerprintProfile:
         data["webgpu_description"] = self.webgpu_description
 
         data["canvas_noise_seed"] = self.canvas_noise_seed
-        data["canvas_noise_enabled"] = True
+        data["canvas_noise_enabled"] = self.canvas_noise_enabled
         data["audio_noise_seed"] = self.audio_noise_seed
         data["font_noise_seed"] = self.font_noise_seed
         data["client_rects_noise_seed"] = self.client_rects_noise_seed
@@ -541,7 +553,8 @@ class FingerprintGenerator:
     def generate(
         self,
         platform: str = "Win32",
-        gpu_vendor_preference: Optional[str] = None
+        gpu_vendor_preference: Optional[str] = None,
+        canvas_noise: bool = False,
     ) -> FingerprintProfile:
         """
         Generate unique fingerprint profile.
@@ -549,6 +562,10 @@ class FingerprintGenerator:
         Args:
             platform: "Win32", "MacIntel", or "Linux x86_64"
             gpu_vendor_preference: "nvidia", "amd", "intel", or None
+            canvas_noise: opt-in per-profile canvas. Default False =
+                stable native canvas (Dolphin-parity, zero tampering
+                signal). True = unique-but-clean canvas via the v2
+                sparse algorithm (use when canvas unlinkability matters).
 
         Returns:
             FingerprintProfile
@@ -631,6 +648,7 @@ class FingerprintGenerator:
             webgpu_device=renderer,
             webgpu_description=f"{renderer} ({device_id})",
             canvas_noise_seed=canvas_seed,
+            canvas_noise_enabled=canvas_noise,
             font_noise_seed=font_seed,
             client_rects_noise_seed=client_rects_seed,
             fonts=fonts,

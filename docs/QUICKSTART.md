@@ -296,6 +296,28 @@ with open("profile.conf", "w") as f:
 |----------|------------|
 | [README.md](../README.md) | Обзор SDK, API reference |
 | [docs/BROWSER_AUTOMATION.md](BROWSER_AUTOMATION.md) | Что работает / заблокировано в Playwright |
-| [docs/PROXY_LAUNCH_GUIDE.md](PROXY_LAUNCH_GUIDE.md) | Прокси: форвардер, DNS leak, WebRTC |
+| [docs/PROXY_LAUNCH_GUIDE.md](PROXY_LAUNCH_GUIDE.md) | Прокси: форвардер, DNS leak, WebRTC; **persistent/GUI-запуск `launch_persistent`** |
+| [docs/COOKIES.md](COOKIES.md) | Экспорт/импорт cookies, attach-by-port |
 | [docs/GEOIP_SETUP.md](GEOIP_SETUP.md) | Настройка MaxMind GeoLite2 |
 | [examples/](../examples/) | Примеры SDK |
+
+### Persistent / GUI-запуск (sync, detached)
+
+Для десктоп-GUI или любого синхронного кода, которому нужен **постоянный**
+браузер под ручным управлением (не авто-закрывается, без Playwright-подключения):
+
+```python
+from huligan import launch_persistent
+
+session = launch_persistent(
+    profile_path="acc1.conf",
+    proxy="socks5://user:pass@1.2.3.4:1080",
+    proxy_type="socks5",
+    user_data_dir="./user_data/acc1",
+)
+print(session.pid, session.cdp_url)   # ведёт себя как subprocess.Popen
+session.stop()                        # закрыть Chrome + форвардер + loop
+```
+
+Тот же анти-детект контракт, что у `Browser` (форвардер, leak-флаги, GeoIP) —
+подробно в [docs/PROXY_LAUNCH_GUIDE.md](PROXY_LAUNCH_GUIDE.md).

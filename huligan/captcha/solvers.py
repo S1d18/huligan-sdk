@@ -291,8 +291,8 @@ class CaptchaSolver:
 
         token = await solver.solve_recaptcha_v2(sitekey=..., page_url=page.url)
         await page.locator("textarea#g-recaptcha-response").fill(token)
-        await page.locator("form").evaluate_handle("f => f.submit()")  # may be blocked
-        # or click the form's submit button:
+        # Submit by clicking the form's submit button (page.evaluate / form.submit
+        # via evaluate are blocked by patch 05_cdp_stealth in paranoid mode):
         await page.locator("button[type=submit]").click()
 
     See ``examples/example_captcha.py`` for the full flow.

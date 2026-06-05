@@ -32,7 +32,6 @@ import asyncio
 import json
 import logging
 import os
-import socket
 import subprocess
 import sys
 import tempfile
@@ -43,6 +42,12 @@ from typing import Optional, Union
 from .chrome import find_chrome
 from .fingerprint import FingerprintGenerator, FingerprintProfile
 from .geoip import GeoIPManager, GeoIPResult
+from .launch_plan import (
+    build_launch_plan,
+    cdp_mode_from_conf,
+    find_free_port,
+    update_conf_keys,
+)
 from .proxy import (
     ProxyForwarder,
     parse_proxy_string,
@@ -270,80 +275,32 @@ class Browser:
         else:
             self._cdp_port = self._find_free_port()
 
-        # 8. Build Chrome args
-        chrome_args = [str(self._chrome_path), "--no-sandbox"]
-
-        # CDP
-        chrome_args.append(f"--remote-debugging-port={self._cdp_port}")
-        chrome_args.append("--remote-allow-origins=*")
-
-        # Proxy
-        if self._forwarder:
-            chrome_args.append(f"--proxy-server=socks5://127.0.0.1:{self._forwarder.port}")
-        elif self._proxy_info:
-            chrome_args.append(
-                f"--proxy-server={self._proxy_info['type']}://"
-                f"{self._proxy_info['host']}:{self._proxy_info['port']}"
-            )
-
-        # Proxy leak prevention
-        if self._proxy_info:
-            # EXCLUDE proxy IP so Chrome can reach the proxy server directly.
-            # For HTTP proxies this is critical — Chrome sends CONNECT to the proxy IP.
-            proxy_ip = self._proxy_info["host"]
-            chrome_args.append(
-                f"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE {proxy_ip}"
-            )
-            # When WebRTC spoof IP is wired into the .conf, let the
-            # patched binary gather candidates and rewrite their IP at
-            # the source (port.cc). Without a spoof IP, fall back to
-            # the older blanket-disable flag — disabled WebRTC is its
-            # own fingerprint signal (<1% of real users), but it is
-            # still better than leaking the real local IP unmasked.
-            if not self._webrtc_spoof_ip:
-                chrome_args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
-            chrome_args.append("--enforce-webrtc-ip-permission-check")
-
-        # Language from GeoIP
-        if language:
-            primary_lang = language.split(",")[0].split("-")[0]
-            chrome_args.append(f"--lang={primary_lang}")
-            chrome_args.append(f"--accept-lang={language}")
-            # Prevent Chrome from reducing navigator.languages and Accept-Language to one entry
-            chrome_args.append("--disable-features=ReduceAcceptLanguage,ReduceAcceptLanguageHTTP")
-            chrome_args.append("--disable-reduce-accept-language")
-
-        # User data dir
+        # 8. Resolve user-data-dir (temp dir is tracked for cleanup in close()).
         if self._user_data_dir_input:
             self._user_data_dir = Path(self._user_data_dir_input)
         else:
             self._temp_data_dir = tempfile.mkdtemp(prefix="huligan_")
             self._user_data_dir = Path(self._temp_data_dir)
 
-        chrome_args.append(f"--user-data-dir={self._user_data_dir}")
-
-        # Headless
-        if self._headless:
-            chrome_args.append("--headless=new")
-
-        # Extra args
-        chrome_args.extend(self._extra_args)
-
-        # 9. Environment
-        env = os.environ.copy()
-        env["HULIGAN_CONFIG_PATH"] = str(self._profile_path)
-        if timezone:
-            env["TZ"] = timezone
-
-        # CDP mode: read from .conf if not already overridden in
-        # os.environ, then forward to Chrome. Browser-side defaults
-        # to "paranoid" if unset or invalid. The C++ patch checks the
-        # env var at the call sites that gate Runtime/Console/Debugger
-        # evaluate-surface suppression — see huligan-browser/patches/
-        # chromium/05_cdp_stealth.py (v2).
-        cdp_mode = self._cdp_mode_from_conf(self._profile_path)
-        if cdp_mode and not env.get("HULIGAN_CDP_MODE"):
-            env["HULIGAN_CDP_MODE"] = cdp_mode
+        # 9. Build Chrome args + env through the shared launch-plan builder.
+        # This is the SINGLE source of truth (proxy-server selection,
+        # host-resolver/WebRTC leak flags, language flags, HULIGAN_CONFIG_PATH,
+        # TZ, HULIGAN_CDP_MODE) — reused verbatim by huligan.launch_persistent
+        # so the GUI path can never drift from the anti-detect contract.
+        chrome_args, env = build_launch_plan(
+            chrome_path=self._chrome_path,
+            profile_path=self._profile_path,
+            cdp_port=self._cdp_port,
+            user_data_dir=self._user_data_dir,
+            forwarder_port=self._forwarder.port if self._forwarder else None,
+            proxy_info=self._proxy_info,
+            webrtc_spoof_ip=self._webrtc_spoof_ip,
+            language=language,
+            timezone=timezone,
+            cdp_mode=cdp_mode_from_conf(self._profile_path),
+            headless=self._headless,
+            extra_args=self._extra_args,
+        )
 
         # 10. Launch Chrome
         self._process = subprocess.Popen(chrome_args, env=env)
@@ -356,32 +313,8 @@ class Browser:
 
     @staticmethod
     def _cdp_mode_from_conf(profile_path) -> Optional[str]:
-        """
-        Read ``cdp_mode`` from a .conf file. Returns ``"paranoid"`` or
-        ``"isolated"`` if a valid value is found, else ``None`` (the
-        caller then keeps any env-var the operator already set).
-
-        Cheap line scan — .conf files are short and the key sits near
-        the bottom. We deliberately avoid parsing the whole file with
-        the Profile dataclass to keep this hot-path dependency-free.
-        """
-        if not profile_path:
-            return None
-        try:
-            with open(profile_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    key, value = line.split("=", 1)
-                    if key.strip() == "cdp_mode":
-                        value = value.strip().lower()
-                        if value in ("paranoid", "isolated"):
-                            return value
-                        return None
-        except OSError:
-            return None
-        return None
+        """Back-compat shim — delegates to :func:`launch_plan.cdp_mode_from_conf`."""
+        return cdp_mode_from_conf(profile_path)
 
     async def new_page(self):
         """
@@ -396,6 +329,32 @@ class Browser:
         context = self._pw_browser.contexts[0] if self._pw_browser.contexts else await self._pw_browser.new_context()
         page = await context.new_page()
         return page
+
+    async def _cookie_page(self):
+        """Reuse an existing page (or open a throwaway one) for cookie CDP ops."""
+        if self._pw_browser is None:
+            self._pw_browser = await self._connect_playwright()
+        ctx = self._pw_browser.contexts[0] if self._pw_browser.contexts else await self._pw_browser.new_context()
+        return ctx.pages[0] if ctx.pages else await ctx.new_page()
+
+    async def export_cookies(self, path, *, page=None, domains=None) -> int:
+        """Export this profile's cookies to a portable JSON bundle.
+
+        Uses CDP (evaluate-free, captures httpOnly). Returns the count written.
+        See ``huligan.cookies`` / ``docs/COOKIES.md``.
+        """
+        from . import cookies as _cookies
+        page = page or await self._cookie_page()
+        return await _cookies.export_cookies_from_page(page, path, domains=domains)
+
+    async def import_cookies(self, path, *, page=None, clear_existing=False) -> int:
+        """Load cookies from a bundle into this profile (before navigating).
+
+        Returns the count loaded.
+        """
+        from . import cookies as _cookies
+        page = page or await self._cookie_page()
+        return await _cookies.import_cookies_to_page(page, path, clear_existing=clear_existing)
 
     async def close(self):
         """Close browser, forwarder, and clean up temp files."""
@@ -481,12 +440,15 @@ class Browser:
         return self._process.pid if self._process else None
 
     def _update_conf(self, timezone: Optional[str], language: Optional[str]):
-        """Update the .conf file with timezone, language, geolocation, and mode fields."""
+        """Update the .conf file with timezone, language, geolocation, and mode fields.
+
+        Builds the update set from the resolved GeoIP/override state, then
+        delegates the line-rewrite to :func:`launch_plan.update_conf_keys` so the
+        file algorithm lives in exactly one place (shared with the persistent
+        launcher).
+        """
         if not self._profile_path:
             return
-
-        with open(self._profile_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
 
         updates = {}
         if timezone:
@@ -502,28 +464,8 @@ class Browser:
             updates["geolocation_longitude"] = str(self._geo.longitude)
             updates["geolocation_accuracy"] = str(int(self._geo.accuracy))
             updates["geolocation_mode"] = "auto"
-        elif timezone or language:
-            # No GeoIP data but user provided overrides — geolocation is manual if present
-            pass
 
-        updated_keys = set()
-        new_lines = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key in updates:
-                    new_lines.append(f"{key}={updates[key]}\n")
-                    updated_keys.add(key)
-                    continue
-            new_lines.append(line)
-
-        for key, value in updates.items():
-            if key not in updated_keys:
-                new_lines.append(f"{key}={value}\n")
-
-        with open(self._profile_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
+        update_conf_keys(self._profile_path, updates)
 
     async def _wait_for_cdp(self, timeout: float = 15.0):
         """Wait for Chrome CDP to become available."""
@@ -552,34 +494,19 @@ class Browser:
 
     async def _connect_playwright(self):
         """Connect to Chrome via CDP using playwright."""
-        # Connect via playwright
         try:
             from playwright.async_api import async_playwright
-            self._playwright = await async_playwright().start()
-            browser = await self._playwright.chromium.connect_over_cdp(self.cdp_url)
-            log.info("Connected via playwright")
-            return browser
-        except ImportError:
-            pass
-
-        # Fall back to playwright
-        try:
-            from playwright.async_api import async_playwright
-            self._playwright = await async_playwright().start()
-            browser = await self._playwright.chromium.connect_over_cdp(self.cdp_url)
-            log.info("Connected via playwright")
-            return browser
         except ImportError:
             raise ImportError(
-                "playwright not is installed.\n"
-                "Install one of them:\n"
-                "  pip install playwright\n"
-                "  pip install playwright"
+                "playwright is not installed. Install it with:\n"
+                "  pip install huligan[playwright]   (or: pip install playwright)"
             )
+        self._playwright = await async_playwright().start()
+        browser = await self._playwright.chromium.connect_over_cdp(self.cdp_url)
+        log.info("Connected via playwright")
+        return browser
 
     @staticmethod
     def _find_free_port() -> int:
-        """Find a free TCP port."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
+        """Find a free TCP port (delegates to :func:`launch_plan.find_free_port`)."""
+        return find_free_port()

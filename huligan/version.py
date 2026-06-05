@@ -9,7 +9,12 @@ from the public binary mirror.
 # Internal build counter — bumped whenever the SDK is republished against
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
-BUILD_NUMBER = 2
+#
+# Build 5 (2026-06-05): public sync persistent-launch API
+#   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
+#   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
+#   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
+BUILD_NUMBER = 5
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "148.0.7778.97"
@@ -22,5 +27,5 @@ FULL_VERSION = f"huligan-{BUILD_NUMBER}-chrome-{CHROME_VERSION}"
 
 
 def get_version() -> str:
-    """Returns display version string like 'Huligan Build 2 (Chrome 147)'."""
+    """Returns the display version string, e.g. 'Huligan Build 4 (Chrome 148)'."""
     return VERSION

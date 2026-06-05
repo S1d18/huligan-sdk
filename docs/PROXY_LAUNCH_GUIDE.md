@@ -144,3 +144,75 @@ from huligan import Browser
 ```
 
 Or use a local MaxMind database — see `docs/GEOIP_SETUP.md`.
+
+## Persistent / GUI launch (synchronous, detached)
+
+`Browser` is an **async** context manager for automation — it connects
+Playwright over CDP and **terminates Chrome on exit**. A desktop GUI (PySide6)
+or any synchronous caller that wants a *persistent, user-driven* browser should
+use `launch_persistent` instead.
+
+```python
+from huligan import launch_persistent
+
+session = launch_persistent(
+    profile_path="~/.huligan_profiles/acc1.conf",
+    proxy="socks5://user:pass@1.2.3.4:1080",
+    proxy_type="socks5",          # pass explicitly from a GUI profile (see below)
+    user_data_dir="~/.huligan_profiles/acc1",  # persistent cookies/storage
+    url="https://browserscan.net",
+)
+
+print(session.pid, session.cdp_url)   # quacks like subprocess.Popen
+# ... user drives the browser by hand ...
+session.stop()                        # terminates Chrome + tears down forwarder + loop
+```
+
+`launch_persistent` runs the **same launch contract** as `Browser` (it reuses
+`build_launch_plan` internally), so the GUI path gets, identically:
+
+- the auth-proxy **SOCKS5 forwarder** (Chrome can't do SOCKS5 auth natively),
+- the **WebRTC / DNS leak flags** and `--host-resolver-rules` exclusion,
+- **GeoIP** timezone / `--accept-lang` resolution,
+- the `HULIGAN_CONFIG_PATH` and `HULIGAN_CDP_MODE` env wiring.
+
+### Why a separate API?
+
+The `ProxyForwarder` is an asyncio TCP server, but a GUI calls from synchronous
+code and the forwarder must outlive the call. `launch_persistent` hosts the
+forwarder on a private daemon-thread event loop for Chrome's lifetime and tears
+it down in `LaunchResult.stop()`. The caller never touches asyncio.
+
+### `LaunchResult`
+
+| Member | Purpose |
+|---|---|
+| `.pid` / `.poll()` / `.wait()` / `.terminate()` / `.kill()` | Popen-compatible surface for process tracking |
+| `.cdp_port` / `.cdp_url` | connect cookie/automation tools to the live session |
+| `.profile_path` / `.user_data_dir` | resolved paths |
+| `.process` | the underlying `subprocess.Popen` (attach a log handle, etc.) |
+| `.stop(timeout=5.0)` | terminate Chrome, then stop forwarder + background loop (idempotent) |
+
+It also works as a context manager (`with LaunchSession(...) as s:`), and you can
+attach arbitrary attributes (e.g. a GUI log handle) to it freely.
+
+### `proxy_type` matters from a GUI
+
+`parse_proxy_string` defaults a bare `host:port:user:pass` string to **socks5**.
+A GUI typically stores the protocol separately (the desktop app defaults to
+`http`). Always pass `proxy_type=` explicitly when the source is a GUI profile so
+the proxy scheme isn't silently wrong.
+
+### Key parameters
+
+| Param | Default | Notes |
+|---|---|---|
+| `conf_geo` | `"copy"` | How resolved timezone/language/geolocation/`webrtc_local_ipv4` reach the binary. The saved profile is a **template, never mutated** by default: `"copy"` launches from a temp copy of the `.conf` (deleted on `stop()`); `"inplace"` writes into the saved file (legacy); `"off"` writes nothing (timezone via `TZ` env, language via `--accept-lang` only — no geolocation/WebRTC conf spoof). |
+| `geoip` | `True` | Run GeoIP + exit-IP probes. Set `False` to skip all network probes (offline / fast launch). |
+| `wait_for_cdp` | `False` | Fire-and-forget by default (matches a GUI launch). Set `True` to block until the CDP endpoint answers. |
+| `popen_kwargs` | `None` | Splatted into `subprocess.Popen` — a GUI passes `creationflags` (e.g. `CREATE_NO_WINDOW`) and `stdout`/`stderr` log handles here. |
+
+### Cookies on a persistent session
+
+The session exposes only a CDP port, not a Playwright `Page`. Use the
+attach-by-port cookie helpers — see `docs/COOKIES.md`.

@@ -1,6 +1,6 @@
 [project]
 name = "huligan"
-version = "1.0.0"
+version = "1.1.0"
 description = "Huligan Antidetect Browser SDK"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -42,6 +42,7 @@ agents = ["playwright>=1.40.0"]
 markdown = ["trafilatura>=2.0", "markdownify>=0.11"]
 captcha = ["aiohttp>=3.9"]
 vision = ["aiohttp>=3.9"]
+mcp = ["mcp>=1.0.0", "playwright>=1.40.0"]
 all = [
     "playwright>=1.40.0",
     "geoip2>=2.9.0",
@@ -50,6 +51,7 @@ all = [
     "trafilatura>=2.0",
     "markdownify>=0.11",
     "aiohttp>=3.9",
+    "mcp>=1.0.0",
 ]
 
 [build-system]

@@ -351,21 +351,6 @@ _PROBE_REQUEST = (
 ).encode("ascii")
 
 
-def _read_until_close(s: socket.socket, deadline: float) -> bytes:
-    chunks = []
-    while True:
-        remaining = deadline - asyncio.get_event_loop().time() if False else None
-        try:
-            data = s.recv(4096)
-        except socket.timeout:
-            break
-        if not data:
-            break
-        chunks.append(data)
-        if len(b"".join(chunks)) > 8192:
-            break  # response is tiny — anything larger is malformed
-    return b"".join(chunks)
-
 
 def _extract_ip_from_http(response: bytes) -> Optional[str]:
     if b"\r\n\r\n" not in response:

@@ -15,6 +15,8 @@ from .geoip import GeoIPManager, GeoIPResult
 from .proxy import ProxyForwarder, parse_proxy_string
 from .chrome import find_chrome
 from .installer import ensure_chrome
+from .launch_plan import build_launch_plan
+from .persistent import launch_persistent, LaunchSession, LaunchResult
 
 # Human-like automation helpers (CDP-compatible). Each block is
 # imported independently — installing pip extras only for the helpers
@@ -70,9 +72,13 @@ try:
 except ImportError:
     pass
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "Browser",
+    "launch_persistent",
+    "LaunchSession",
+    "LaunchResult",
+    "build_launch_plan",
     "FingerprintGenerator",
     "FingerprintProfile",
     "GeoIPManager",

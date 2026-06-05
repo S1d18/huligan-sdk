@@ -78,6 +78,17 @@ if MODE == "async":
         vp = page.viewport_size
         if vp:
             return vp["width"], vp["height"]
+        # Over connect_over_cdp (how huligan.Browser connects) page.viewport_size
+        # is None — fall back to CDP, mirroring mouse.get_viewport_size().
+        try:
+            from .cdp_helpers import cdp_viewport_size
+            size = await cdp_viewport_size(page)
+            if size:
+                if isinstance(size, dict):
+                    return size.get("width", 1280), size.get("height", 720)
+                return size[0], size[1]
+        except Exception:
+            pass
         return 1280, 720
 
 

@@ -42,7 +42,7 @@ content = await page.content()
 # Multiple pages/tabs
 page2 = await browser.new_page()
 
-# Downloads, file upload
+# File upload
 await page.locator("input[type='file']").set_input_files("file.pdf")
 ```
 
@@ -246,6 +246,47 @@ await frame.locator("button.verify").click()
 page.on("dialog", lambda dialog: dialog.accept())
 await page.locator("#delete-btn").click()
 ```
+
+### Receiving downloads
+
+Playwright's `accept_downloads=True` flag lives on `browser_context.new_context()`, which Huligan doesn't expose — `Browser` attaches over CDP to an already-running Chrome and the default context is implicit. Two paths work in practice:
+
+**Path A — `page.expect_download()` (preferred).** With `connect_over_cdp`, the existing context already accepts downloads; you just need to capture the `Download` object as it's triggered:
+
+```python
+from huligan import Browser
+
+async with Browser(proxy=...) as browser:
+    page = await browser.new_page()
+    await page.goto("https://file-examples.com/.../sample.pdf")
+    async with page.expect_download(timeout=30000) as dl_info:
+        await page.locator("a.download-btn").click()
+    download = await dl_info.value
+    await download.save_as("./downloads/file.pdf")
+    print(f"Saved {download.suggested_filename} ({await download.path()})")
+```
+
+**Path B — `Page.setDownloadBehavior` via CDP (fallback / batch).** When you can't easily wrap the click in `expect_download` (multi-tab flows, automatic-download pages, headless without a UI hook), tell Chrome up front where to write:
+
+```python
+from pathlib import Path
+
+page = await browser.new_page()
+client = await page.context.new_cdp_session(page)
+download_dir = Path("./downloads").resolve()
+download_dir.mkdir(exist_ok=True)
+await client.send("Page.setDownloadBehavior", {
+    "behavior": "allow",
+    "downloadPath": str(download_dir),
+})
+await page.goto("https://example.com/auto-download")
+# Chrome writes the file to ./downloads/ without firing a Download event.
+# Poll the directory yourself or wait for a known filename.
+```
+
+Path B is also the only way to capture downloads triggered by `target=_blank` links that Playwright doesn't always surface as `Download` events on CDP-connected browsers.
+
+**Full runnable example:** `examples/example_download.py`.
 
 ### Network interception
 

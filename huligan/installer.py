@@ -27,13 +27,19 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from .version import CHROME_VERSION
 
 DEFAULT_REPO = "S1d18/huligan-releases"
 ASSET_NAME_TEMPLATE = "huligan-chrome-{version}-win64.zip"
 GH_API = "https://api.github.com"
+# Public manifest listing the latest published build + per-version metadata.
+MANIFEST_URL_TEMPLATE = "https://raw.githubusercontent.com/{repo}/main/manifest.json"
+
+# Progress callback signature: (downloaded_bytes, total_bytes); total may be 0
+# if the server omits Content-Length.
+ProgressCallback = Callable[[int, int], None]
 
 # SHA256 of officially published archives. Verified before extraction.
 _KNOWN_SHA256 = {
@@ -83,9 +89,18 @@ def _build_browser_url(version: str) -> str:
     return f"https://github.com/{repo}/releases/download/v{version}/{asset}"
 
 
-def _download(url: str, dest: Path, token: Optional[str] = None) -> None:
-    from tqdm import tqdm
+def _download(
+    url: str,
+    dest: Path,
+    token: Optional[str] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> None:
+    """Stream ``url`` to ``dest``.
 
+    With ``progress_callback`` set, report progress through it (GUI use — no
+    console). Otherwise fall back to a ``tqdm`` bar if tqdm is importable, else
+    download silently. tqdm is therefore an optional dependency, not required.
+    """
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -93,23 +108,41 @@ def _download(url: str, dest: Path, token: Optional[str] = None) -> None:
         # JSON metadata instead of the binary.
         req.add_header("Accept", "application/octet-stream")
 
+    bar = None
+    if progress_callback is None:
+        try:
+            from tqdm import tqdm
+            bar = None  # created once total is known
+        except Exception:
+            tqdm = None  # noqa: F841 — silent download
+
     with urllib.request.urlopen(req) as response:
         total = int(response.headers.get("Content-Length", 0))
         dest.parent.mkdir(parents=True, exist_ok=True)
         chunk = 1024 * 64
-        with open(dest, "wb") as fh, tqdm(
-            total=total,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-            desc=dest.name,
-        ) as bar:
-            while True:
-                buf = response.read(chunk)
-                if not buf:
-                    break
-                fh.write(buf)
-                bar.update(len(buf))
+        downloaded = 0
+        if progress_callback is None:
+            try:
+                from tqdm import tqdm
+                bar = tqdm(total=total, unit="B", unit_scale=True,
+                           unit_divisor=1024, desc=dest.name)
+            except Exception:
+                bar = None
+        try:
+            with open(dest, "wb") as fh:
+                while True:
+                    buf = response.read(chunk)
+                    if not buf:
+                        break
+                    fh.write(buf)
+                    downloaded += len(buf)
+                    if progress_callback is not None:
+                        progress_callback(downloaded, total)
+                    elif bar is not None:
+                        bar.update(len(buf))
+        finally:
+            if bar is not None:
+                bar.close()
 
 
 def _verify_sha256(path: Path, expected: str) -> None:
@@ -136,10 +169,14 @@ def _flatten_top_level(target_dir: Path) -> None:
         inner.rmdir()
 
 
-def ensure_chrome(version: str = CHROME_VERSION) -> Path:
+def ensure_chrome(
+    version: str = CHROME_VERSION,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> Path:
     """Ensure the patched Chrome binary is installed; return path to ``chrome.exe``.
 
-    Idempotent: a hot cache short-circuits in O(1).
+    Idempotent: a hot cache short-circuits in O(1). Pass ``progress_callback``
+    (``(downloaded, total)``) to drive a GUI progress bar instead of the console.
     """
     if sys.platform != "win32":
         raise RuntimeError(
@@ -191,7 +228,7 @@ def ensure_chrome(version: str = CHROME_VERSION) -> Path:
         zip_path = tmp / asset_name
 
         try:
-            _download(url, zip_path, token=token)
+            _download(url, zip_path, token=token, progress_callback=progress_callback)
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403, 404) and not token:
                 raise RuntimeError(
@@ -223,3 +260,35 @@ def ensure_chrome(version: str = CHROME_VERSION) -> Path:
 
     print(f"[huligan] Chrome {version} installed at {target_dir}")
     return chrome_exe
+
+
+def is_installed(version: str = CHROME_VERSION) -> bool:
+    """True if ``version`` is already extracted and marked OK in the cache."""
+    root = _cache_root()
+    return (root / version / "chrome.exe").is_file() and (root / f"{version}.ok").exists()
+
+
+def latest_version(
+    repo: Optional[str] = None,
+    token: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    """Return the ``latest`` build version from the public release manifest.
+
+    Reads ``manifest.json`` from the releases repo (raw.githubusercontent.com).
+    Returns ``None`` on any network/parse error so callers can degrade to a
+    "couldn't check" message rather than crashing.
+    """
+    repo = repo or os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
+    token = token or os.environ.get("HULIGAN_GH_TOKEN")
+    url = MANIFEST_URL_TEMPLATE.format(repo=repo)
+    try:
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        latest = data.get("latest")
+        return str(latest) if latest else None
+    except Exception:
+        return None

@@ -1,6 +1,6 @@
 [project]
 name = "huligan"
-version = "1.1.1"
+version = "1.1.2"
 description = "Huligan Antidetect Browser SDK"
 readme = "README.md"
 requires-python = ">=3.9"

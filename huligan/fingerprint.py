@@ -93,12 +93,14 @@ class FingerprintProfile:
     media_devices_audio_output_label: str = "Speakers (High Definition Audio)"
 
     # Battery
+    battery_enabled: bool = True
     battery_charging: bool = True
     battery_level: float = 1.0
     battery_charging_time: int = 0
     battery_discharging_time: float = float('inf')
 
     # Connection
+    connection_type: str = "ethernet"  # ethernet, wifi, cellular, none, other (matches GUI Profile)
     connection_downlink: float = 10.0
     connection_effective_type: str = "4g"
     connection_rtt: int = 50
@@ -108,6 +110,17 @@ class FingerprintProfile:
     do_not_track: bool = False
     block_port_scan: bool = True
     history_length_min: int = 2
+
+    # Audio properties (read by patch 09_audio — were previously NOT serialized
+    # by to_conf, so SDK-generated profiles lacked them vs the reference conf).
+    audio_sample_rate: int = 44100
+    audio_max_channel_count: int = 2
+    audio_base_latency: float = 0.01
+    audio_output_latency: float = 0.02
+
+    # matchMedia prefers-color-scheme. Default "dark" avoids the CreepJS
+    # "prefersLightColor: true" headless tell (PARAMETER_MAPPING.md).
+    preferred_color_scheme: str = "dark"
 
     # CDP stealth mode. "paranoid" (default) blocks Runtime.enable /
     # Console.enable / Debugger.enable evaluate surfaces so page JS
@@ -274,201 +287,117 @@ class FingerprintProfile:
         return profile
 
     def to_conf(self) -> str:
-        """Convert to .conf file format"""
-        lines = []
-        lines.append("# Huligan Antidetect Profile - Auto-generated")
-        lines.append(f"# Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append("")
+        """Convert to .conf file format via the canonical serializer.
 
-        # Screen
-        lines.append("# Screen")
-        lines.append(f"screen_width={self.screen_width}")
-        lines.append(f"screen_height={self.screen_height}")
-        lines.append(f"screen_avail_width={self.avail_width}")
-        lines.append(f"screen_avail_height={self.avail_height}")
-        lines.append(f"outer_width={self.outer_width}")
-        lines.append(f"outer_height={self.outer_height}")
-        lines.append(f"color_depth={self.color_depth}")
-        lines.append(f"device_pixel_ratio={self.device_pixel_ratio}")
-        lines.append("")
+        Delegates to :func:`huligan.conf_spec.render_conf` (the single source of
+        truth for key names + formats) so the SDK and the desktop app cannot
+        drift. Output is the same contract as before plus the audio properties
+        and ``preferred_color_scheme`` that the binary reads but the old
+        hand-written serializer omitted.
+        """
+        from .conf_spec import render_conf, default_media_devices
 
-        # Hardware
-        lines.append("# Hardware")
-        lines.append(f"cpu_cores={self.cpu_cores}")
-        lines.append(f"device_memory={self.device_memory}")
-        lines.append(f"platform={self.platform}")
-        lines.append(f"max_touch_points={self.max_touch_points}")
-        lines.append("")
-
-        # WebGL
-        lines.append("# WebGL")
-        lines.append(f"webgl_vendor={self.webgl_vendor}")
-        lines.append(f"webgl_renderer={self.webgl_renderer}")
-        if self.webgl_extensions:
-            lines.append(f"webgl_extensions={','.join(self.webgl_extensions)}")
-        if self.webgl2_extensions:
-            lines.append(f"webgl2_extensions={','.join(self.webgl2_extensions)}")
-        if self.webgl_params:
-            lines.append("# WebGL Parameters (GL enum -> value)")
-            for gl_enum, value in sorted(self.webgl_params.items()):
-                if isinstance(value, list):
-                    lines.append(f"webgl_param_{gl_enum}={','.join(str(v) for v in value)}")
-                else:
-                    lines.append(f"webgl_param_{gl_enum}={value}")
-        lines.append("")
-
-        # WebGPU
-        lines.append("# WebGPU")
-        lines.append(f"webgpu_vendor={self.webgpu_vendor}")
-        lines.append(f"webgpu_architecture={self.webgpu_architecture}")
-        lines.append(f"webgpu_device={self.webgpu_device}")
-        lines.append(f"webgpu_description={self.webgpu_description}")
-        # v2 extensions — only emitted when set so the .conf stays clean
-        # and the C++ patch falls through to passthrough by default.
-        if self.webgpu_max_buffer_size:
-            lines.append(f"webgpu_max_buffer_size={self.webgpu_max_buffer_size}")
-        if self.webgpu_max_storage_buffer_binding_size:
-            lines.append(
-                f"webgpu_max_storage_buffer_binding_size={self.webgpu_max_storage_buffer_binding_size}"
-            )
-        if self.webgpu_max_compute_workgroup_size_x:
-            lines.append(
-                f"webgpu_max_compute_workgroup_size_x={self.webgpu_max_compute_workgroup_size_x}"
-            )
-        if self.webgpu_max_compute_workgroup_size_y:
-            lines.append(
-                f"webgpu_max_compute_workgroup_size_y={self.webgpu_max_compute_workgroup_size_y}"
-            )
-        if self.webgpu_max_compute_workgroup_size_z:
-            lines.append(
-                f"webgpu_max_compute_workgroup_size_z={self.webgpu_max_compute_workgroup_size_z}"
-            )
-        if self.webgpu_features:
-            lines.append(f"webgpu_features={','.join(self.webgpu_features)}")
-        if self.webgpu_subgroup_min_size:
-            lines.append(f"webgpu_subgroup_min_size={self.webgpu_subgroup_min_size}")
-        if self.webgpu_subgroup_max_size:
-            lines.append(f"webgpu_subgroup_max_size={self.webgpu_subgroup_max_size}")
-        lines.append("")
-
-        # Noise
-        lines.append("# Noise Seeds")
-        lines.append(f"canvas_noise_seed={self.canvas_noise_seed}")
-        lines.append(f"canvas_noise_enabled={'true' if self.canvas_noise_enabled else 'false'}")
-        lines.append(f"audio_noise_seed=0")  # Disabled: BrowserScan detects audio noise as "modified manually"
-        lines.append(f"font_noise_seed={self.font_noise_seed}")
-        lines.append(f"client_rects_noise_seed={self.client_rects_noise_seed}")
-        lines.append("")
-
-        # Fonts
-        lines.append("# Fonts")
-        lines.append(f"fonts={','.join(self.fonts)}")
-        if self.fonts_dir:
-            lines.append(f"fonts_dir={self.fonts_dir}")
-        lines.append("")
-
-        # Geo
-        lines.append("# Geolocation")
-        lines.append(f"languages={self.languages}")
-        if self.intl_locale:
-            # Read by the V8/ICU and Accept-Language hooks. Empty key
-            # falls back to languages[0] inside the patched binary.
-            lines.append(f"intl_locale={self.intl_locale}")
-        lines.append(f"geolocation_latitude={self.geolocation_latitude}")
-        lines.append(f"geolocation_longitude={self.geolocation_longitude}")
-        lines.append(f"geolocation_accuracy={self.geolocation_accuracy}")
-        lines.append(f"timezone={self.timezone}")
-        lines.append("")
-
-        # Media Devices — format matches what 12_media_devices.py C++ patch reads
-        seed_str = str(self.canvas_noise_seed)
-        def _mid(suffix):
-            return hashlib.sha256(f"{seed_str}_{suffix}".encode()).hexdigest()
-
-        audio_in_did  = _mid("audio_in_device")
-        audio_grp_id  = _mid("audio_group")
-        audio_out_did = _mid("audio_out_device")
-        video_did     = _mid("video_device")
-        video_grp_id  = _mid("video_group")
-
-        lines.append("# Media Devices")
-        lines.append("media_devices_count=3")
-        lines.append("media_device_0_kind=audioinput")
-        lines.append(f"media_device_0_label={self.media_devices_audio_input_label}")
-        lines.append(f"media_device_0_device_id={audio_in_did}")
-        lines.append(f"media_device_0_group_id={audio_grp_id}")
-        lines.append("media_device_1_kind=audiooutput")
-        lines.append(f"media_device_1_label={self.media_devices_audio_output_label}")
-        lines.append(f"media_device_1_device_id={audio_out_did}")
-        lines.append(f"media_device_1_group_id={audio_grp_id}")
-        lines.append("media_device_2_kind=videoinput")
-        lines.append(f"media_device_2_label={self.media_devices_video_input_label}")
-        lines.append(f"media_device_2_device_id={video_did}")
-        lines.append(f"media_device_2_group_id={video_grp_id}")
-        lines.append("")
-
-        # Battery
-        lines.append("# Battery")
-        lines.append(f"battery_charging={'true' if self.battery_charging else 'false'}")
-        lines.append(f"battery_level={self.battery_level}")
-        lines.append(f"battery_charging_time={self.battery_charging_time}")
-        lines.append(f"battery_discharging_time={'inf' if math.isinf(self.battery_discharging_time) else str(int(self.battery_discharging_time))}")
-        lines.append("")
-
-        # Connection
-        lines.append("# Connection")
-        lines.append(f"connection_downlink={self.connection_downlink}")
-        lines.append(f"connection_effective_type={self.connection_effective_type}")
-        lines.append(f"connection_rtt={self.connection_rtt}")
-        lines.append(f"connection_save_data={'true' if self.connection_save_data else 'false'}")
-        lines.append("")
-
-        # Extra
-        lines.append("# Extra")
-        lines.append(f"do_not_track={'true' if self.do_not_track else 'false'}")
-        lines.append(f"block_port_scan={'1' if self.block_port_scan else '0'}")
-        lines.append(f"history_length_min={self.history_length_min}")
-        lines.append("")
-
-        # CDP Stealth (always enabled)
-        lines.append("# CDP Stealth")
+        media_devices = default_media_devices(
+            self.canvas_noise_seed,
+            audio_in_label=self.media_devices_audio_input_label,
+            audio_out_label=self.media_devices_audio_output_label,
+            video_label=self.media_devices_video_input_label,
+        )
         cdp_mode = self.cdp_mode if self.cdp_mode in ("paranoid", "isolated") else "paranoid"
-        lines.append(f"cdp_mode={cdp_mode}")
-        lines.append("cdp_stealth=1")
-        lines.append("cdp_hide_json_endpoint=1")
-        lines.append("cdp_filter_stack_traces=1")
-        lines.append("cdp_suppress_console_replay=1")
-        lines.append("cdp_suppress_script_enum=1")
-        lines.append("cdp_normalize_timing=1")
-        lines.append("cdp_fix_screen_coords=1")
-        lines.append("")
 
-        # Screen extras
-        lines.append("# Screen extras")
-        lines.append("screen_avail_left=0")
-        lines.append("screen_avail_top=0")
-        lines.append(f"pixel_depth={self.color_depth}")
-        lines.append("")
-
-        # WebGPU flag
-        lines.append("# WebGPU")
-        lines.append("webgpu_enabled=1")
-        lines.append("")
-
-        # WebRTC
-        lines.append("# WebRTC")
-        # Legacy gate kept for the C++ side. When webrtc_local_ipv4 /
-        # webrtc_local_ipv6 are populated the patched binary spoofs
-        # the candidate IP instead of refusing to gather candidates;
-        # an empty value means the candidate is passed through as-is.
-        lines.append("webrtc_block=1")
-        if self.webrtc_local_ipv4:
-            lines.append(f"webrtc_local_ipv4={self.webrtc_local_ipv4}")
-        if self.webrtc_local_ipv6:
-            lines.append(f"webrtc_local_ipv6={self.webrtc_local_ipv6}")
-        lines.append("")
-
-        return '\n'.join(lines)
+        values = {
+            # Screen
+            "screen_width": self.screen_width,
+            "screen_height": self.screen_height,
+            "screen_avail_width": self.avail_width,
+            "screen_avail_height": self.avail_height,
+            "outer_width": self.outer_width,
+            "outer_height": self.outer_height,
+            "color_depth": self.color_depth,
+            "device_pixel_ratio": self.device_pixel_ratio,
+            "pixel_depth": self.color_depth,
+            "screen_avail_left": 0,
+            "screen_avail_top": 0,
+            # Hardware
+            "cpu_cores": self.cpu_cores,
+            "device_memory": self.device_memory,
+            "platform": self.platform,
+            "max_touch_points": self.max_touch_points,
+            # WebGL
+            "webgl_vendor": self.webgl_vendor,
+            "webgl_renderer": self.webgl_renderer,
+            "webgl_extensions": self.webgl_extensions,
+            "webgl2_extensions": self.webgl2_extensions,
+            "webgl_params": self.webgl_params,
+            # WebGPU
+            "webgpu_vendor": self.webgpu_vendor,
+            "webgpu_architecture": self.webgpu_architecture,
+            "webgpu_device": self.webgpu_device,
+            "webgpu_description": self.webgpu_description,
+            "webgpu_max_buffer_size": self.webgpu_max_buffer_size,
+            "webgpu_max_storage_buffer_binding_size": self.webgpu_max_storage_buffer_binding_size,
+            "webgpu_max_compute_workgroup_size_x": self.webgpu_max_compute_workgroup_size_x,
+            "webgpu_max_compute_workgroup_size_y": self.webgpu_max_compute_workgroup_size_y,
+            "webgpu_max_compute_workgroup_size_z": self.webgpu_max_compute_workgroup_size_z,
+            "webgpu_features": self.webgpu_features,
+            "webgpu_subgroup_min_size": self.webgpu_subgroup_min_size,
+            "webgpu_subgroup_max_size": self.webgpu_subgroup_max_size,
+            "webgpu_enabled": True,
+            # Noise
+            "canvas_noise_seed": self.canvas_noise_seed,
+            "canvas_noise_enabled": self.canvas_noise_enabled,
+            "audio_noise_seed": 0,
+            "font_noise_seed": self.font_noise_seed,
+            "client_rects_noise_seed": self.client_rects_noise_seed,
+            # Audio
+            "audio_sample_rate": self.audio_sample_rate,
+            "audio_max_channel_count": self.audio_max_channel_count,
+            "audio_base_latency": self.audio_base_latency,
+            "audio_output_latency": self.audio_output_latency,
+            # Fonts
+            "fonts": self.fonts,
+            "fonts_dir": self.fonts_dir,
+            # Geo
+            "languages": self.languages,
+            "intl_locale": self.intl_locale,
+            "geolocation_latitude": self.geolocation_latitude,
+            "geolocation_longitude": self.geolocation_longitude,
+            "geolocation_accuracy": self.geolocation_accuracy,
+            "timezone": self.timezone,
+            # Media
+            "media_devices": media_devices,
+            # Battery
+            "battery_enabled": self.battery_enabled,
+            "battery_charging": self.battery_charging,
+            "battery_level": self.battery_level,
+            "battery_charging_time": self.battery_charging_time,
+            "battery_discharging_time": self.battery_discharging_time,
+            # Connection
+            "connection_type": self.connection_type,
+            "connection_downlink": self.connection_downlink,
+            "connection_effective_type": self.connection_effective_type,
+            "connection_rtt": self.connection_rtt,
+            "connection_save_data": self.connection_save_data,
+            # Extra
+            "do_not_track": self.do_not_track,
+            "block_port_scan": self.block_port_scan,
+            "history_length_min": self.history_length_min,
+            "preferred_color_scheme": self.preferred_color_scheme,
+            # CDP stealth
+            "cdp_mode": cdp_mode,
+            "cdp_stealth": True,
+            "cdp_hide_json_endpoint": True,
+            "cdp_filter_stack_traces": True,
+            "cdp_suppress_console_replay": True,
+            "cdp_suppress_script_enum": True,
+            "cdp_normalize_timing": True,
+            "cdp_fix_screen_coords": True,
+            # WebRTC
+            "webrtc_block": True,
+            "webrtc_local_ipv4": self.webrtc_local_ipv4,
+            "webrtc_local_ipv6": self.webrtc_local_ipv6,
+        }
+        return render_conf(values, header="Huligan Antidetect Profile - Auto-generated")
 
     def to_json(self) -> str:
         """Convert to JSON format"""

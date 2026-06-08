@@ -10,14 +10,17 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-06-08): Chrome 149.0.7827.54 major bump (148 -> 149). BUILD_NUMBER
+#   resets to 1 on the major. No SDK API changes vs Build 5 — same
+#   launch_persistent / LaunchResult / build_launch_plan surface; no new .conf key.
 # Build 5 (2026-06-05): public sync persistent-launch API
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 5
+BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "148.0.7778.97"
+CHROME_VERSION = "149.0.7827.54"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"
@@ -27,5 +30,5 @@ FULL_VERSION = f"huligan-{BUILD_NUMBER}-chrome-{CHROME_VERSION}"
 
 
 def get_version() -> str:
-    """Returns the display version string, e.g. 'Huligan Build 4 (Chrome 148)'."""
+    """Returns the display version string, e.g. 'Huligan Build 1 (Chrome 149)'."""
     return VERSION

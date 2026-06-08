@@ -64,7 +64,7 @@ array shape so cookies from other tools interoperate, wrapped with metadata:
 {
   "schema": "huligan-cookies/1",
   "exported_at": "2026-06-04T12:00:00Z",
-  "chrome_version": "148.0.7778.97",
+  "chrome_version": "149.0.7827.54",
   "cookies": [
     {"name": "...", "value": "...", "domain": ".x.com", "path": "/",
      "expires": 1789999999, "httpOnly": true, "secure": true, "sameSite": "Lax"}

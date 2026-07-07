@@ -107,14 +107,39 @@ def build_launch_plan(
             args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
         args.append("--enforce-webrtc-ip-permission-check")
 
+    # Features to disable, emitted as a SINGLE --disable-features switch.
+    # Chrome keeps only the last --disable-features on the command line, so we
+    # must collect everything here and join once — never append the switch twice.
+    disable_features = [
+        # Trust Anchor IDs (TLS ClientHello extension 0xCA34) is a gradual-
+        # rollout feature: net::features::kTLSTrustAnchorIDs is disabled by
+        # default in source, but the variations/Finch seed flips it ON for some
+        # sessions. When ON, BoringSSL advertises the trust_anchors extension,
+        # which pushes our JA4 from t13d1517h2 (canonical Chrome, feature OFF) to
+        # t13d1518h2 — a non-Chrome TLS fingerprint WAFs (SafeLine etc.) flag.
+        # The seed toggling it is what makes detection intermittent ("works every
+        # other time"). Pin it OFF so JA4 always matches stock Chrome.
+        # (Verified: stock Google Chrome with this pin emits the identical JA4
+        # t13d1517h2_8daaf6152771_b6f405a00624 — measured against 149 patched and
+        # 150 stock. An earlier "t13d1516h2 / 16 ext" note here was off by one.)
+        "TLSTrustAnchorIDs",
+        # Same class: net::features::kTlsMldsaSignatures (ML-DSA, draft-ietf-tls-
+        # mldsa) is disabled by default but Finch can flip it on, which adds
+        # ML-DSA codepoints to signature_algorithms and shifts JA4 again. Pin
+        # off too so the whole TLS surface stays deterministic and Chrome-like.
+        "TlsMldsaSignatures",
+    ]
+
     # Language from GeoIP
     if language:
         primary_lang = language.split(",")[0].split("-")[0]
         args.append(f"--lang={primary_lang}")
         args.append(f"--accept-lang={language}")
         # Prevent Chrome from reducing navigator.languages / Accept-Language to one entry.
-        args.append("--disable-features=ReduceAcceptLanguage,ReduceAcceptLanguageHTTP")
+        disable_features.extend(["ReduceAcceptLanguage", "ReduceAcceptLanguageHTTP"])
         args.append("--disable-reduce-accept-language")
+
+    args.append("--disable-features=" + ",".join(disable_features))
 
     # User data dir
     args.append(f"--user-data-dir={user_data_dir}")

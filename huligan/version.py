@@ -10,6 +10,12 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 3 (2026-06-25): pin Finch-flippable TLS features off in launch_plan.py
+#   (--disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures). The variations seed
+#   was flipping kTLSTrustAnchorIDs on for some sessions, adding ClientHello ext
+#   0xCA34 → JA4 t13d1516h2 -> t13d1517h2, a non-Chrome TLS fingerprint WAFs
+#   (SafeLine) flag. Symptom was intermittent ("works every other time") detection
+#   at a stable IP. Now JA4 is deterministic. pyproject 1.1.2 -> 1.1.3.
 # Build 2 (2026-06-08): canonical .conf serializer (huligan.conf_spec) — one source
 #   of truth shared by FingerprintProfile.to_conf AND the app's GUI Profile, so SDK-
 #   and GUI-made profiles emit an identical, complete .conf (fixes the 2026-06-05
@@ -22,7 +28,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 2
+BUILD_NUMBER = 3
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "149.0.7827.54"

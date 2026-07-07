@@ -28,6 +28,17 @@ python -m huligan.mcp
 
 Speaks MCP over stdio — connect from any MCP host.
 
+Or embed it in your own process instead of shelling out to `-m`:
+
+```python
+from huligan import run_mcp_server
+
+run_mcp_server()  # blocks, same stdio server as `python -m huligan.mcp`
+```
+
+A runnable smoke test that calls the five tool functions directly
+in-process (no MCP client needed) lives at `examples/example_mcp.py`.
+
 ## Connect from Claude Desktop
 
 Add to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`):

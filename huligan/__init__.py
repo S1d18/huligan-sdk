@@ -72,6 +72,15 @@ try:
 except ImportError:
     pass
 
+# MCP server — expose the antidetect Browser to Claude Desktop / any
+# MCP-compatible host as tools — requires huligan[mcp]
+_HAS_MCP = False
+try:
+    from .mcp import run as run_mcp_server
+    from .mcp import _AVAILABLE as _HAS_MCP
+except ImportError:
+    pass
+
 __version__ = "1.1.1"
 __all__ = [
     "Browser",
@@ -103,3 +112,5 @@ if _HAS_CAPTCHA:
     __all__ += ["CaptchaSolver", "CaptchaSolveError"]
 if _HAS_VISION:
     __all__ += ["VisionAgent", "VisionAgentError"]
+if _HAS_MCP:
+    __all__ += ["run_mcp_server"]

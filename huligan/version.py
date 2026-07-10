@@ -10,6 +10,13 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-07-10): Chrome 150.0.7871.101 major bump (149 -> 150). BUILD_NUMBER
+#   resets to 1 on the major. Binary now ships with proprietary codecs
+#   (proprietary_codecs=true + ffmpeg_branding="Chrome") so H.264/AAC/MP4 play —
+#   CreepJS mimes 10/12, matching real Chrome; earlier builds were open-codec-only
+#   Chromium (a detectable tell). No SDK API changes vs 149 Build 3 — same
+#   launch_persistent / build_launch_plan surface, no new .conf key. JA4 remains
+#   t13d1517h2 (byte-identical to stock Chrome 150; TLS pins unchanged).
 # Build 3 (2026-06-25): pin Finch-flippable TLS features off in launch_plan.py
 #   (--disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures). The variations seed
 #   was flipping kTLSTrustAnchorIDs on for some sessions, adding ClientHello ext
@@ -28,10 +35,10 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 3
+BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "149.0.7827.54"
+CHROME_VERSION = "150.0.7871.101"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

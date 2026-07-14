@@ -84,14 +84,32 @@ def test_language_flags():
     args, _ = _plan(language="fi-FI,fi,en-US,en")
     assert "--lang=fi" in args
     assert "--accept-lang=fi-FI,fi,en-US,en" in args
-    assert "--disable-features=ReduceAcceptLanguage,ReduceAcceptLanguageHTTP" in args
     assert "--disable-reduce-accept-language" in args
+    # ReduceAcceptLanguage is merged INTO the single --disable-features switch,
+    # not emitted as its own switch: Chrome honours only the last
+    # --disable-features on the command line, so appending a second one would
+    # silently drop the TLS-pin features (JA4 regression). Assert membership in
+    # the one switch and that there is exactly one.
+    df = [a for a in args if a.startswith("--disable-features=")]
+    assert len(df) == 1, f"expected exactly one --disable-features, got {df}"
+    feats = df[0].split("=", 1)[1].split(",")
+    assert "ReduceAcceptLanguage" in feats
+    assert "ReduceAcceptLanguageHTTP" in feats
+    # the TLS pins must survive alongside the language features
+    assert "TLSTrustAnchorIDs" in feats
+    assert "TlsMldsaSignatures" in feats
 
 
 def test_no_language_no_lang_flags():
     args, _ = _plan()
     assert not any(a.startswith("--lang=") for a in args)
     assert not any(a.startswith("--accept-lang=") for a in args)
+    # The TLS pins are unconditional; the language features must be absent.
+    df = [a for a in args if a.startswith("--disable-features=")]
+    assert len(df) == 1
+    feats = df[0].split("=", 1)[1].split(",")
+    assert "TLSTrustAnchorIDs" in feats and "TlsMldsaSignatures" in feats
+    assert "ReduceAcceptLanguage" not in feats
 
 
 def test_env_timezone_and_cdp_mode():

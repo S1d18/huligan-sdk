@@ -10,6 +10,14 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 2 (2026-07-15): Chrome auto-update surface + portable profile bundles.
+#   Manifest-driven resolution (installer.resolve_version / channels: pinned/stable/
+#   latest, TTL-cached manifest, sha from manifest), .conf compatibility gate
+#   (conf_spec.CONF_SCHEMA_VERSION + IncompatibleBuildError), `huligan` CLI
+#   (chrome list/update/pin/prune, version), and huligan.profile_bundle
+#   (export/extract/read/write + Browser.export_profile_bundle/import_profile_bundle)
+#   — one .hbundle carries fingerprint .conf + cookies. No new .conf key; schema v1.
+#   pyproject 1.2.0 -> 1.3.0.
 # Build 1 (2026-07-10): Chrome 150.0.7871.101 major bump (149 -> 150). BUILD_NUMBER
 #   resets to 1 on the major. Binary now ships with proprietary codecs
 #   (proprietary_codecs=true + ffmpeg_branding="Chrome") so H.264/AAC/MP4 play —
@@ -35,7 +43,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 1
+BUILD_NUMBER = 2
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "150.0.7871.101"

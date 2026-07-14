@@ -18,6 +18,10 @@ pip install huligan[captcha]      # Async wrappers for 2Captcha / AntiCaptcha / 
 pip install huligan[vision]       # Vision-LLM agent: click elements by description
 ```
 
+> **Platform:** the pure-Python APIs import on any OS, but the patched
+> Chromium binary the SDK launches is **Windows (win64) only** — launching a
+> browser on Linux/macOS raises. Embed accordingly.
+
 ## How It Works
 
 When you call `Browser(proxy=...)`, the SDK automatically:
@@ -39,6 +43,45 @@ The patched Chromium binary (~180 MB) is fetched once and cached at
 network access needed. Override the location with `HULIGAN_CHROME_DIR`,
 or skip the download entirely by setting `HULIGAN_CHROME` to an existing
 `chrome.exe`.
+
+### Chrome version & updates
+
+Which patched Chrome build the SDK launches is controlled per machine via
+`HULIGAN_CHROME_CHANNEL`:
+
+- **`pinned` (default)** — each SDK release targets one exact Chrome build
+  (`huligan.version.CHROME_VERSION`). Fully reproducible: farms and long jobs
+  always get the same binary and never touch the network on `Browser()`. To move
+  to a newer Chrome, upgrade the SDK:
+  ```bash
+  pip install --upgrade huligan
+  ```
+- **`stable` / `latest` (opt-in)** — resolve the version from the release
+  manifest in [`huligan-releases`](https://github.com/S1d18/huligan-releases)
+  (cached 24h) and download a newer build **without reinstalling the SDK**. Use
+  this to pick up new monthly builds automatically:
+  ```bash
+  export HULIGAN_CHROME_CHANNEL=latest
+  ```
+
+  > **Caveat:** the SDK↔build compatibility gate is not shipped yet. A `latest`
+  > build that adds a new `.conf` key an older SDK can't generate could produce a
+  > degraded fingerprint. Until the gate lands, prefer `pinned` + `pip upgrade`
+  > for production; use channels only against builds you have validated.
+
+Pin an exact version regardless of channel by calling
+`ensure_chrome(version="150.0.7871.101")` at startup, or set `HULIGAN_CHROME` to
+an existing `chrome.exe` to skip resolution entirely.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `HULIGAN_CHROME` | Path to an existing `chrome.exe` — skips download/resolution |
+| `HULIGAN_CHROME_DIR` | Cache directory (default `~/.huligan/chrome`) |
+| `HULIGAN_CHROME_CHANNEL` | `pinned` (default) / `stable` / `latest` |
+| `HULIGAN_RELEASES_REPO` | Override the releases mirror (default `S1d18/huligan-releases`) |
+| `HULIGAN_GH_TOKEN` | GitHub token, only needed if the mirror is private |
 
 ## Quick Start
 

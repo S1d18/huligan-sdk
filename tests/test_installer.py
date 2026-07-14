@@ -11,7 +11,8 @@ tmp dir via ``HULIGAN_CHROME_DIR``. What we verify:
     offline+stale -> degrade to the stale copy;
   * ``ensure_chrome`` verifies the archive against the manifest sha (mismatch
     raises), so a build absent from ``_KNOWN_SHA256`` still installs safely;
-  * ``find_chrome`` tracks ``HULIGAN_CHROME_CHANNEL``.
+  * ``find_chrome`` tracks ``HULIGAN_CHROME_CHANNEL``;
+  * the .conf compatibility gate refuses builds newer than this SDK's schema.
 """
 
 import hashlib
@@ -25,7 +26,11 @@ import zipfile
 import pytest
 
 from huligan import installer
+from huligan.installer import IncompatibleBuildError
+from huligan.conf_spec import CONF_SCHEMA_VERSION
 from huligan.version import CHROME_VERSION
+
+_TOO_NEW = CONF_SCHEMA_VERSION + 1  # a build this SDK cannot generate .conf for
 
 
 # --- helpers --------------------------------------------------------------
@@ -256,5 +261,105 @@ def test_find_chrome_pinned_ignores_manifest(cache_dir, monkeypatch):
     (vdir / "chrome.exe").write_text("x")
 
     _no_network(monkeypatch)  # pinned must not resolve via manifest
+    resolved = chrome_mod.find_chrome()
+    assert resolved == (vdir / "chrome.exe").resolve()
+
+
+# --- .conf compatibility gate ---------------------------------------------
+
+
+def test_channel_refuses_build_needing_newer_schema(cache_dir, monkeypatch):
+    version = "160.0.0.1"
+    manifest = {
+        "latest": version,
+        "versions": {version: {"min_conf_schema": _TOO_NEW,
+                               "win64": {"sha256": "x"}}},
+    }
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    with pytest.raises(IncompatibleBuildError, match="schema"):
+        installer.resolve_version("latest")
+
+
+def test_channel_accepts_build_at_current_schema(cache_dir, monkeypatch):
+    version = "160.0.0.2"
+    manifest = {
+        "latest": version,
+        "versions": {version: {"min_conf_schema": CONF_SCHEMA_VERSION,
+                               "win64": {"sha256": "ok"}}},
+    }
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    assert installer.resolve_version("latest") == (version, "ok")
+
+
+def test_manifest_without_min_conf_schema_is_not_gated(cache_dir, monkeypatch):
+    # Older manifests omit the field entirely -> must not gate (backward compat).
+    version = "160.0.0.3"
+    manifest = {"latest": version, "versions": {version: {"win64": {"sha256": "ok"}}}}
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    assert installer.resolve_version("latest") == (version, "ok")
+
+
+def test_explicit_unknown_version_is_gated(cache_dir, monkeypatch):
+    version = "160.0.0.4"
+    assert version not in installer._KNOWN_SHA256
+    manifest = {
+        "versions": {version: {"min_conf_schema": _TOO_NEW,
+                               "win64": {"sha256": "x"}}},
+    }
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    with pytest.raises(IncompatibleBuildError):
+        installer._resolve_target(version, None)
+
+
+def test_known_version_bypasses_gate_offline(cache_dir, monkeypatch):
+    # A build baked into this SDK is compatible by construction: resolve it with
+    # no network even if a (hostile) manifest would claim it needs a newer schema.
+    _no_network(monkeypatch)
+    known = next(iter(installer._KNOWN_SHA256))
+    version, sha = installer._resolve_target(known, None)
+    assert (version, sha) == (known, installer._KNOWN_SHA256[known])
+
+
+def test_pinned_is_never_gated(cache_dir, monkeypatch):
+    _no_network(monkeypatch)  # pinned resolves offline, gate never consulted
+    version, sha = installer.resolve_version("pinned")
+    assert version == CHROME_VERSION
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_ensure_chrome_refuses_incompatible_before_download(cache_dir, monkeypatch):
+    version = "160.0.0.5"
+    manifest = {
+        "latest": version,
+        "versions": {version: {"min_conf_schema": _TOO_NEW,
+                               "win64": {"sha256": "x"}}},
+    }
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+
+    def no_download(*a, **k):
+        raise AssertionError("download attempted for an incompatible build")
+    monkeypatch.setattr(installer, "_download", no_download)
+
+    with pytest.raises(IncompatibleBuildError):
+        installer.ensure_chrome(channel="latest")
+
+
+def test_find_chrome_degrades_to_pinned_on_incompatible(cache_dir, monkeypatch):
+    from huligan import chrome as chrome_mod
+
+    monkeypatch.setenv("HULIGAN_CHROME_CHANNEL", "latest")
+    monkeypatch.delenv("HULIGAN_CHROME", raising=False)
+    monkeypatch.chdir(cache_dir)
+
+    # pinned build is present in the cache as the safe fallback
+    vdir = cache_dir / CHROME_VERSION
+    vdir.mkdir(parents=True)
+    (vdir / "chrome.exe").write_text("x")
+
+    def incompatible(channel):
+        raise IncompatibleBuildError("needs newer schema")
+    monkeypatch.setattr(installer, "resolve_version", incompatible)
+
+    # must not raise — degrades to the pinned cached build
     resolved = chrome_mod.find_chrome()
     assert resolved == (vdir / "chrome.exe").resolve()

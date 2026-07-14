@@ -14,7 +14,14 @@ from .fingerprint import FingerprintGenerator, FingerprintProfile
 from .geoip import GeoIPManager, GeoIPResult
 from .proxy import ProxyForwarder, parse_proxy_string
 from .chrome import find_chrome
-from .installer import ensure_chrome, resolve_version, latest_version, is_installed
+from .installer import (
+    ensure_chrome,
+    resolve_version,
+    latest_version,
+    is_installed,
+    IncompatibleBuildError,
+)
+from .conf_spec import CONF_SCHEMA_VERSION
 from .launch_plan import build_launch_plan
 from .persistent import launch_persistent, LaunchSession, LaunchResult
 
@@ -99,6 +106,8 @@ __all__ = [
     "resolve_version",
     "latest_version",
     "is_installed",
+    "IncompatibleBuildError",
+    "CONF_SCHEMA_VERSION",
 ]
 if _HAS_MOUSE_KB:
     __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey"]

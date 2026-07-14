@@ -64,10 +64,13 @@ Which patched Chrome build the SDK launches is controlled per machine via
   export HULIGAN_CHROME_CHANNEL=latest
   ```
 
-  > **Caveat:** the SDK↔build compatibility gate is not shipped yet. A `latest`
-  > build that adds a new `.conf` key an older SDK can't generate could produce a
-  > degraded fingerprint. Until the gate lands, prefer `pinned` + `pip upgrade`
-  > for production; use channels only against builds you have validated.
+  > **Compatibility:** a `latest`/`stable` build is gated on the `.conf` schema.
+  > If the build needs a newer key than this SDK can generate
+  > (`min_conf_schema` in the manifest > `huligan.CONF_SCHEMA_VERSION`), the
+  > resolver raises `IncompatibleBuildError` and `find_chrome` falls back to the
+  > pinned build instead of launching a degraded fingerprint — so an out-of-date
+  > SDK never silently follows the channel into an unsupported browser. Run
+  > `pip install --upgrade huligan` to move forward.
 
 Pin an exact version regardless of channel by calling
 `ensure_chrome(version="150.0.7871.101")` at startup, or set `HULIGAN_CHROME` to

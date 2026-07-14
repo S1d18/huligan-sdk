@@ -28,6 +28,22 @@ import math
 from typing import Optional
 
 
+# Version of the .conf contract THIS SDK can generate. It is the compatibility
+# axis between the SDK and a patched-Chrome build: a build published with a
+# higher `min_conf_schema` in the release manifest needs a newer key this SDK
+# does not emit yet, so the installer refuses to download it (see
+# huligan.installer._check_conf_compat) rather than launch a browser with a
+# half-populated fingerprint.
+#
+# BUMP THIS by 1 whenever a NEW .conf key is added to render_conf(), in the same
+# change that adds the key. Do NOT bump for value-format tweaks or comments —
+# only for keys a build could newly require. History:
+#   v1 (2026-07-15): baseline. All keys emitted by render_conf() as of Chrome
+#      150 / Build 1 (screen, hardware, webgl, webgpu, noise seeds, audio, fonts,
+#      geolocation, media devices, battery, connection, extra, cdp, webrtc).
+CONF_SCHEMA_VERSION = 1
+
+
 # --- value formatters (return None to omit the line) ----------------------
 
 def _s(x):

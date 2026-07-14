@@ -59,16 +59,24 @@ Status: proposed (2026-07-15). Do after the thin-app migration settles.
 
 ---
 
-## Phase 2 — compat-гейт по схеме `.conf` (не по min/max_sdk)
+## Phase 2 — compat-гейт по схеме `.conf` (не по min/max_sdk) — DONE (2026-07-15)
 
 Ось совместимости у нас — **схема `.conf`** (`conf_spec.py`) и флаги запуска,
 а не «SDK↔браузер» вообще (история `version.py`: почти все мажоры — «no new .conf key»).
 
-- Добавить `CONF_SCHEMA_VERSION` в `conf_spec.py` (bump только при новом .conf-ключе).
-- В `manifest.json`: на версию добавить `min_conf_schema`.
-- `resolve_version` отказывается ставить билд с `min_conf_schema > CONF_SCHEMA_VERSION`
-  и внятно пишет «обнови huligan-sdk: этот Chrome требует новый .conf-ключ».
-- Спасает от авто-апдейта `latest`-канала в бинарник, который SDK ещё не умеет кормить.
+- [x] `CONF_SCHEMA_VERSION` в `conf_spec.py` (=1 baseline; bump только при новом .conf-ключе).
+- [x] В `manifest.json`: на версию добавлено `min_conf_schema` (все 147–150 = 1).
+- [x] `resolve_version`/`ensure_chrome` кидают `IncompatibleBuildError`, если
+  `min_conf_schema > CONF_SCHEMA_VERSION`, с текстом «обнови huligan-sdk».
+- [x] `find_chrome` при несовместимости деградирует к pinned-билду (гарантированно
+  совместимому) с предупреждением, а не роняет запуск.
+- [x] Гейт не трогает `pinned` и baked-in версии (`_KNOWN_SHA256`) — они офлайн и
+  совместимы by construction. Манифест без `min_conf_schema` не гейтится (старые манифесты).
+- Экспортированы `IncompatibleBuildError`, `CONF_SCHEMA_VERSION`.
+
+**Контракт на будущее:** при добавлении нового ключа в `render_conf()` — в том же
+изменении bump `CONF_SCHEMA_VERSION`, а в манифесте у билдов, которые этот ключ
+требуют, ставить новый `min_conf_schema`.
 
 ---
 

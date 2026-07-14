@@ -30,7 +30,19 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
+from .conf_spec import CONF_SCHEMA_VERSION
 from .version import CHROME_VERSION
+
+
+class IncompatibleBuildError(RuntimeError):
+    """A resolved Chrome build needs a newer .conf schema than this SDK emits.
+
+    Raised by version resolution when the manifest's ``min_conf_schema`` for the
+    target build exceeds :data:`huligan.conf_spec.CONF_SCHEMA_VERSION`. Distinct
+    from a plain RuntimeError so callers (e.g. ``find_chrome``) can degrade to the
+    pinned build instead of failing hard.
+    """
+
 
 DEFAULT_REPO = "S1d18/huligan-releases"
 ASSET_NAME_TEMPLATE = "huligan-chrome-{version}-win64.zip"
@@ -146,20 +158,60 @@ def _sha_from_manifest(version: str, manifest: Optional[dict] = None) -> Optiona
         return None
 
 
+def _safe_fetch_manifest() -> Optional[dict]:
+    """Best-effort manifest fetch that returns None instead of raising."""
+    try:
+        return _fetch_manifest()
+    except Exception:
+        return None
+
+
+def _min_conf_schema(version: str, manifest: dict) -> Optional[int]:
+    """The .conf schema version a build requires, or None if unspecified."""
+    try:
+        raw = manifest["versions"][version].get("min_conf_schema")
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
+
+
+def _check_conf_compat(version: str, manifest: dict) -> None:
+    """Raise IncompatibleBuildError if this SDK is too old for ``version``.
+
+    No-op when the manifest omits ``min_conf_schema`` for the build (older
+    manifests) or when the SDK's schema is new enough.
+    """
+    required = _min_conf_schema(version, manifest)
+    if required is not None and required > CONF_SCHEMA_VERSION:
+        raise IncompatibleBuildError(
+            f"Chrome build {version} requires .conf schema v{required}, but this "
+            f"huligan-sdk emits v{CONF_SCHEMA_VERSION}. Launching it would produce "
+            f"an incomplete fingerprint. Upgrade the SDK:\n"
+            f"  pip install --upgrade huligan"
+        )
+
+
 def _resolve_target(
     version: Optional[str],
     channel: Optional[str],
 ) -> Tuple[str, Optional[str]]:
     """Resolve (version, expected_sha256) from an explicit version or a channel.
 
-    Precedence keeps the ``pinned`` path fully offline: a version known in
-    ``_KNOWN_SHA256`` (including CHROME_VERSION) never triggers a manifest fetch.
-    Only unknown versions or non-pinned channels consult the manifest.
+    Precedence keeps the ``pinned`` path fully offline: a version baked into
+    ``_KNOWN_SHA256`` (including CHROME_VERSION) never triggers a manifest fetch
+    and is compatible by construction — it shipped with this SDK. Only unknown
+    explicit versions or non-pinned channels consult the manifest, and those are
+    gated on ``min_conf_schema`` before we agree to download them.
     """
     if version is not None:
-        # Explicit pin. Prefer the baked-in sha (offline); fall back to manifest
-        # for builds published after this SDK was released.
-        sha = _KNOWN_SHA256.get(version) or _sha_from_manifest(version)
+        if version in _KNOWN_SHA256:
+            # Baked-in build: offline, and known-compatible with this SDK.
+            return version, _KNOWN_SHA256[version]
+        # Unknown explicit version: consult the manifest for sha + compat gate.
+        manifest = _safe_fetch_manifest()
+        if manifest is not None:
+            _check_conf_compat(version, manifest)
+        sha = _sha_from_manifest(version, manifest) if manifest is not None else None
         return version, sha
 
     channel = (channel or DEFAULT_CHANNEL).strip().lower()
@@ -169,6 +221,7 @@ def _resolve_target(
 
     manifest = _fetch_manifest()
     resolved = _channel_version(manifest, channel)
+    _check_conf_compat(resolved, manifest)
     sha = _sha_from_manifest(resolved, manifest)
     return resolved, sha
 

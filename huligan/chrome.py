@@ -51,7 +51,7 @@ def find_chrome(
         if candidate.is_file():
             return candidate.resolve()
 
-    from .installer import ensure_chrome, resolve_version, _cache_root
+    from .installer import ensure_chrome, resolve_version, IncompatibleBuildError, _cache_root
     from .version import CHROME_VERSION
 
     # HULIGAN_CHROME_CHANNEL picks which version this machine tracks. Default
@@ -65,6 +65,15 @@ def find_chrome(
     else:
         try:
             target_version, _ = resolve_version(channel)
+        except IncompatibleBuildError as exc:
+            # The channel points at a build newer than this SDK's .conf schema.
+            # Falling back to the pinned build keeps launch working with a
+            # guaranteed-compatible browser instead of a degraded fingerprint.
+            print(
+                f"[huligan] {exc}\n"
+                f"[huligan] Using pinned Chrome {CHROME_VERSION} instead."
+            )
+            target_version = CHROME_VERSION
         except Exception:
             target_version = CHROME_VERSION
 

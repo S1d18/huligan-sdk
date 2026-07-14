@@ -23,6 +23,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -41,6 +42,19 @@ MANIFEST_URL_TEMPLATE = "https://raw.githubusercontent.com/{repo}/main/manifest.
 # if the server omits Content-Length.
 ProgressCallback = Callable[[int, int], None]
 
+# Which channel drives version resolution when no explicit version is given.
+#   pinned  -> version.CHROME_VERSION, sha from _KNOWN_SHA256; never touches the
+#              network (reproducible for farms / the Chrome checker).
+#   stable  -> manifest["channels"]["stable"] if present, else manifest["latest"].
+#   latest  -> manifest["channels"]["latest"] if present, else manifest["latest"].
+DEFAULT_CHANNEL = "pinned"
+
+# How long a locally cached manifest.json is trusted before we re-fetch. The
+# manifest only changes when the operator publishes a build, so a day is ample
+# and keeps Browser() off the network on the hot path.
+_MANIFEST_TTL_SECONDS = 24 * 3600
+_PLATFORM_KEY = "win64"
+
 # SHA256 of officially published archives. Verified before extraction.
 _KNOWN_SHA256 = {
     "147.0.7727.56": "a0b84882d1c3d8686bc5083be5ea43c43b0d6d85db63ae335b11b6bbdb4d0e28",
@@ -55,6 +69,117 @@ def _cache_root() -> Path:
     if override:
         return Path(override)
     return Path.home() / ".huligan" / "chrome"
+
+
+def _manifest_cache_path() -> Path:
+    """Where the release manifest is cached locally (under the cache root)."""
+    return _cache_root() / "manifest.json"
+
+
+def _fetch_manifest(force: bool = False, timeout: float = 10.0) -> dict:
+    """Return the release ``manifest.json``, TTL-cached under the cache root.
+
+    A fresh cache (younger than ``_MANIFEST_TTL_SECONDS``) short-circuits with
+    no network. On a cache miss/expiry we fetch from the releases repo; if that
+    fails but a (stale) cache exists we return the stale copy so a network blip
+    never bricks resolution. Raises only when there is neither network nor any
+    cache to fall back on.
+    """
+    cache = _manifest_cache_path()
+    cached_data = None
+    if cache.is_file():
+        try:
+            cached_data = json.loads(cache.read_text(encoding="utf-8"))
+        except Exception:
+            cached_data = None
+
+    if not force and cached_data is not None:
+        try:
+            age = time.time() - cache.stat().st_mtime
+        except OSError:
+            age = _MANIFEST_TTL_SECONDS + 1  # treat unstattable as expired
+        if age < _MANIFEST_TTL_SECONDS:
+            return cached_data
+
+    repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
+    token = os.environ.get("HULIGAN_GH_TOKEN")
+    url = MANIFEST_URL_TEMPLATE.format(repo=repo)
+    try:
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        if cached_data is not None:
+            return cached_data  # stale, but better than nothing (offline degrade)
+        raise
+
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass  # cache write is best-effort; resolution still works from `data`
+    return data
+
+
+def _channel_version(manifest: dict, channel: str) -> str:
+    """Resolve a channel name to a concrete version string from the manifest."""
+    channels = manifest.get("channels") or {}
+    if channel in channels and channels[channel]:
+        return str(channels[channel])
+    latest = manifest.get("latest")
+    if latest:
+        return str(latest)
+    raise RuntimeError(
+        f"Manifest has no channel {channel!r} and no 'latest' key "
+        f"(repo {os.environ.get('HULIGAN_RELEASES_REPO', DEFAULT_REPO)})."
+    )
+
+
+def _sha_from_manifest(version: str, manifest: Optional[dict] = None) -> Optional[str]:
+    """Dig the win64 sha256 for ``version`` out of the manifest, or None."""
+    try:
+        manifest = manifest if manifest is not None else _fetch_manifest()
+        return str(manifest["versions"][version][_PLATFORM_KEY]["sha256"])
+    except Exception:
+        return None
+
+
+def _resolve_target(
+    version: Optional[str],
+    channel: Optional[str],
+) -> Tuple[str, Optional[str]]:
+    """Resolve (version, expected_sha256) from an explicit version or a channel.
+
+    Precedence keeps the ``pinned`` path fully offline: a version known in
+    ``_KNOWN_SHA256`` (including CHROME_VERSION) never triggers a manifest fetch.
+    Only unknown versions or non-pinned channels consult the manifest.
+    """
+    if version is not None:
+        # Explicit pin. Prefer the baked-in sha (offline); fall back to manifest
+        # for builds published after this SDK was released.
+        sha = _KNOWN_SHA256.get(version) or _sha_from_manifest(version)
+        return version, sha
+
+    channel = (channel or DEFAULT_CHANNEL).strip().lower()
+    if channel == "pinned":
+        sha = _KNOWN_SHA256.get(CHROME_VERSION) or _sha_from_manifest(CHROME_VERSION)
+        return CHROME_VERSION, sha
+
+    manifest = _fetch_manifest()
+    resolved = _channel_version(manifest, channel)
+    sha = _sha_from_manifest(resolved, manifest)
+    return resolved, sha
+
+
+def resolve_version(channel: str = DEFAULT_CHANNEL) -> Tuple[str, Optional[str]]:
+    """Public: resolve (version, expected_sha256) for a channel.
+
+    ``pinned`` (default) returns CHROME_VERSION with no network. ``stable`` /
+    ``latest`` consult the TTL-cached release manifest.
+    """
+    return _resolve_target(None, channel)
 
 
 def _resolve_asset(repo: str, version: str, asset_name: str, token: str) -> Tuple[str, dict]:
@@ -172,10 +297,21 @@ def _flatten_top_level(target_dir: Path) -> None:
 
 
 def ensure_chrome(
-    version: str = CHROME_VERSION,
+    version: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
+    *,
+    channel: Optional[str] = None,
 ) -> Path:
     """Ensure the patched Chrome binary is installed; return path to ``chrome.exe``.
+
+    Version selection:
+        * ``version`` given      -> that exact version (explicit pin).
+        * ``channel`` given      -> resolved from the release manifest
+          (``stable`` / ``latest``), or ``pinned`` for CHROME_VERSION.
+        * neither given          -> ``pinned`` (CHROME_VERSION), fully offline.
+
+    The expected sha256 comes from the manifest when the version is not baked
+    into ``_KNOWN_SHA256`` — so a new monthly build no longer needs an SDK edit.
 
     Idempotent: a hot cache short-circuits in O(1). Pass ``progress_callback``
     (``(downloaded, total)``) to drive a GUI progress bar instead of the console.
@@ -185,6 +321,8 @@ def ensure_chrome(
             f"Huligan currently ships Windows binaries only "
             f"(detected platform: {sys.platform})."
         )
+
+    version, expected_sha = _resolve_target(version, channel)
 
     root = _cache_root()
     target_dir = root / version
@@ -240,9 +378,8 @@ def ensure_chrome(
                 ) from exc
             raise
 
-        expected = _KNOWN_SHA256.get(version)
-        if expected:
-            _verify_sha256(zip_path, expected)
+        if expected_sha:
+            _verify_sha256(zip_path, expected_sha)
 
         if target_dir.exists():
             shutil.rmtree(target_dir)
@@ -277,19 +414,14 @@ def latest_version(
 ) -> Optional[str]:
     """Return the ``latest`` build version from the public release manifest.
 
-    Reads ``manifest.json`` from the releases repo (raw.githubusercontent.com).
-    Returns ``None`` on any network/parse error so callers can degrade to a
-    "couldn't check" message rather than crashing.
+    Reads the TTL-cached ``manifest.json`` (repo + token come from the
+    ``HULIGAN_RELEASES_REPO`` / ``HULIGAN_GH_TOKEN`` environment variables; the
+    ``repo``/``token`` params are accepted for backward compatibility but the
+    env-driven cache is authoritative). Returns ``None`` on any network/parse
+    error so callers can degrade to a "couldn't check" message rather than crashing.
     """
-    repo = repo or os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
-    token = token or os.environ.get("HULIGAN_GH_TOKEN")
-    url = MANIFEST_URL_TEMPLATE.format(repo=repo)
     try:
-        req = urllib.request.Request(url)
-        if token:
-            req.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read())
+        data = _fetch_manifest(timeout=timeout)
         latest = data.get("latest")
         return str(latest) if latest else None
     except Exception:

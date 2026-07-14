@@ -51,10 +51,24 @@ def find_chrome(
         if candidate.is_file():
             return candidate.resolve()
 
-    from .installer import ensure_chrome, _cache_root
+    from .installer import ensure_chrome, resolve_version, _cache_root
     from .version import CHROME_VERSION
 
-    cached = _cache_root() / CHROME_VERSION / "chrome.exe"
+    # HULIGAN_CHROME_CHANNEL picks which version this machine tracks. Default
+    # "pinned" reproduces the old behaviour exactly (CHROME_VERSION, no network);
+    # "stable"/"latest" resolve from the release manifest. If manifest resolution
+    # fails (offline + uncached) we degrade to the pinned version so a network
+    # blip never bricks launch.
+    channel = os.environ.get("HULIGAN_CHROME_CHANNEL", "pinned").strip().lower()
+    if channel == "pinned":
+        target_version = CHROME_VERSION
+    else:
+        try:
+            target_version, _ = resolve_version(channel)
+        except Exception:
+            target_version = CHROME_VERSION
+
+    cached = _cache_root() / target_version / "chrome.exe"
     if cached.is_file():
         return cached.resolve()
 
@@ -63,7 +77,7 @@ def find_chrome(
         return Path(chrome_in_path).resolve()
 
     if auto_install:
-        return ensure_chrome(CHROME_VERSION).resolve()
+        return ensure_chrome(target_version).resolve()
 
     raise FileNotFoundError(
         "Huligan Chrome not found. Either:\n"

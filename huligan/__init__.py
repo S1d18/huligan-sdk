@@ -14,7 +14,7 @@ from .fingerprint import FingerprintGenerator, FingerprintProfile
 from .geoip import GeoIPManager, GeoIPResult
 from .proxy import ProxyForwarder, parse_proxy_string
 from .chrome import find_chrome
-from .installer import ensure_chrome
+from .installer import ensure_chrome, resolve_version, latest_version, is_installed
 from .launch_plan import build_launch_plan
 from .persistent import launch_persistent, LaunchSession, LaunchResult
 
@@ -96,6 +96,9 @@ __all__ = [
     "parse_proxy_string",
     "find_chrome",
     "ensure_chrome",
+    "resolve_version",
+    "latest_version",
+    "is_installed",
 ]
 if _HAS_MOUSE_KB:
     __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey"]

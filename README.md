@@ -250,6 +250,39 @@ async with Browser(
     page = await browser.new_page()
 ```
 
+### Portable profile bundles (fingerprint + login in one file)
+
+Move a whole identity — the fingerprint **and** its login — to another machine or
+person as a single `.hbundle` (a zip of the `.conf` + a cookie bundle). Importing
+recreates the same browser identity and lands on the site already authenticated.
+
+```python
+from huligan import Browser, extract_profile_bundle
+
+# --- export (source machine, logged in) ---
+async with Browser(proxy="socks5://...", profile_path="acc.conf",
+                   user_data_dir="./ud/acc") as b:
+    await b.export_profile_bundle("acc.hbundle", domains=["facebook.com"])
+
+# --- import (target machine) ---
+# 1. unpack the fingerprint BEFORE launch (Chrome reads it at startup)
+info = extract_profile_bundle("acc.hbundle", conf_out="acc.conf")
+
+# 2. launch with that identity, restore the login, then navigate
+async with Browser(proxy="socks5://...", profile_path="acc.conf") as b:
+    page = await b.new_page()
+    await b.import_profile_bundle("acc.hbundle")     # cookies, before goto
+    await page.goto("https://facebook.com")          # already logged in
+```
+
+Import is two-phase because the fingerprint is applied at **launch** while cookies
+restore into a **running** context. Prefer a bundle over copying a whole
+`user_data_dir` between machines — the latter is fragile (absolute paths, lock
+files, machine-bound state). For a persistent bundleless login on the *same*
+machine, just pass `user_data_dir` and relaunch. Persistent/GUI launches (CDP
+port only) have `profile_bundle.export_profile_bundle_to_file` /
+`import_profile_bundle_from_file`.
+
 ### Human-like automation
 
 ```python
@@ -600,6 +633,7 @@ See `examples/` directory:
 | `example_parallel_browsers.py` | asyncio concurrency with Semaphore |
 | `example_proxy_rotation.py` | Same profile, different proxies |
 | `example_persistent_session.py` | Save/restore login sessions (cookies) |
+| `example_profile_bundle.py` | Export/import fingerprint + login as one portable `.hbundle` |
 
 **Automation & scraping:**
 

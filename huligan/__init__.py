@@ -22,6 +22,11 @@ from .installer import (
     IncompatibleBuildError,
 )
 from .conf_spec import CONF_SCHEMA_VERSION
+from .profile_bundle import (
+    extract_profile_bundle,
+    read_profile_bundle,
+    write_profile_bundle,
+)
 from .launch_plan import build_launch_plan
 from .persistent import launch_persistent, LaunchSession, LaunchResult
 
@@ -108,6 +113,9 @@ __all__ = [
     "is_installed",
     "IncompatibleBuildError",
     "CONF_SCHEMA_VERSION",
+    "extract_profile_bundle",
+    "read_profile_bundle",
+    "write_profile_bundle",
 ]
 if _HAS_MOUSE_KB:
     __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey"]

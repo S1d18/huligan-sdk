@@ -52,8 +52,12 @@ def _clean_for_set(cookie: dict) -> dict:
     return out
 
 
-async def export_cookies_from_page(page, path, *, domains: Optional[Sequence[str]] = None) -> int:
-    """Dump all cookies to a JSON bundle. Returns the number written."""
+async def build_cookie_bundle(page, *, domains: Optional[Sequence[str]] = None) -> dict:
+    """Collect all cookies into a bundle dict (schema ``huligan-cookies/1``).
+
+    Shared by :func:`export_cookies_from_page` (writes it to a file) and the
+    profile-bundle exporter (embeds it in the zip). No file I/O here.
+    """
     cdp = await _new_cdp(page)
     try:
         cookies = await _get_all_cookies(cdp)
@@ -70,16 +74,21 @@ async def export_cookies_from_page(page, path, *, domains: Optional[Sequence[str
             if c.get("domain", "").lstrip(".").lower().endswith(wanted)
         ]
 
-    bundle = {
+    return {
         "schema": SCHEMA,
         "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "chrome_version": CHROME_VERSION,
         "cookies": cookies,
     }
+
+
+async def export_cookies_from_page(page, path, *, domains: Optional[Sequence[str]] = None) -> int:
+    """Dump all cookies to a JSON bundle. Returns the number written."""
+    bundle = await build_cookie_bundle(page, domains=domains)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(bundle, indent=2, ensure_ascii=False), encoding="utf-8")
-    return len(cookies)
+    return len(bundle["cookies"])
 
 
 def load_cookie_bundle(path) -> list[dict]:
@@ -90,13 +99,12 @@ def load_cookie_bundle(path) -> list[dict]:
     return data  # bare array (Cookie-Editor / EditThisCookie export)
 
 
-async def import_cookies_to_page(page, path, *, clear_existing: bool = False) -> int:
-    """Restore cookies from a bundle. Returns the number loaded.
+async def set_cookies_on_page(page, cookies, *, clear_existing: bool = False) -> int:
+    """Load a list of cookie dicts into the page's context over CDP.
 
-    Call BEFORE navigating to the target site so cookies apply on the first
-    request.
+    Shared by :func:`import_cookies_to_page` (reads from a file) and the
+    profile-bundle importer (reads from the zip). Call BEFORE navigating.
     """
-    cookies = load_cookie_bundle(path)
     cdp = await _new_cdp(page)
     try:
         if clear_existing:
@@ -110,6 +118,16 @@ async def import_cookies_to_page(page, path, *, clear_existing: bool = False) ->
         except Exception:
             pass
     return len(cookies)
+
+
+async def import_cookies_to_page(page, path, *, clear_existing: bool = False) -> int:
+    """Restore cookies from a bundle. Returns the number loaded.
+
+    Call BEFORE navigating to the target site so cookies apply on the first
+    request.
+    """
+    cookies = load_cookie_bundle(path)
+    return await set_cookies_on_page(page, cookies, clear_existing=clear_existing)
 
 
 # --- attach-by-port convenience -------------------------------------------

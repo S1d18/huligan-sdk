@@ -356,6 +356,30 @@ class Browser:
         page = page or await self._cookie_page()
         return await _cookies.import_cookies_to_page(page, path, clear_existing=clear_existing)
 
+    async def export_profile_bundle(self, path, *, domains=None, name=None, page=None) -> int:
+        """Export this profile (fingerprint .conf + cookies) to a portable bundle.
+
+        One file to recreate this identity AND its login elsewhere. Returns the
+        number of cookies written. See ``huligan.profile_bundle``.
+        """
+        from . import profile_bundle as _pb
+        if not self._profile_path:
+            raise RuntimeError("no profile .conf to export (browser not started?)")
+        page = page or await self._cookie_page()
+        return await _pb.export_profile_bundle_from_page(
+            page, path, conf_path=self._profile_path, domains=domains, name=name)
+
+    async def import_profile_bundle(self, path, *, page=None, clear_existing=False) -> int:
+        """Restore a bundle's cookies into this running profile (before navigating).
+
+        The fingerprint half must have been extracted BEFORE launch and passed as
+        ``profile_path`` — see :func:`huligan.extract_profile_bundle`. This call
+        restores only the login. Returns the count loaded.
+        """
+        from . import profile_bundle as _pb
+        page = page or await self._cookie_page()
+        return await _pb.import_profile_cookies_to_page(page, path, clear_existing=clear_existing)
+
     async def close(self):
         """Close browser, forwarder, and clean up temp files."""
         # Close playwright connection

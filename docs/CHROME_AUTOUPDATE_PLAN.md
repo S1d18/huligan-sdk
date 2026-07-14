@@ -80,16 +80,17 @@ Status: proposed (2026-07-15). Do after the thin-app migration settles.
 
 ---
 
-## Phase 3 — CLI (`huligan chrome ...`)
+## Phase 3 — CLI (`huligan chrome ...`) — DONE (2026-07-15)
 
-Net-new (сейчас нет ни `console_scripts`, ни `__main__`). Явный контроль для CI/ферм.
-
-- `pyproject.toml`: `[project.scripts] huligan = "huligan.__main__:main"`.
-- Команды:
-  - `huligan chrome list` — что в кэше + что `latest`/`stable` в манифесте.
-  - `huligan chrome update [--channel stable|latest] [--check]` — резолв+download; `--check` только сверяет.
-  - `huligan chrome pin <ver>` — записать явный пин в `~/.huligan/config`.
-  - `huligan chrome prune [--keep 2]` — удалить старые версии кэша (rollback-запас N последних).
+- [x] `pyproject.toml`: `[project.scripts] huligan = "huligan.__main__:main"`.
+- [x] `huligan chrome list` — кэш + effective channel + манифест (latest/channels/published).
+- [x] `huligan chrome update [--channel pinned|stable|latest] [--check]` — резолв+download;
+  `--channel` также персистит канал; `--check` только сверяет, ничего не качает; несовместимый билд → rc 2.
+- [x] `huligan chrome pin <ver>` / `--clear` / без арг (показать) — персист в `config.json` под cache-root.
+- [x] `huligan chrome prune [--keep N]` — удаляет старые версии, защищает pinned default + текущий target.
+- [x] `huligan version`.
+- Персист (channel/pinned_version) в `_cache_root()/config.json`; `HULIGAN_CHROME_CHANNEL` (env) всегда перекрывает.
+- `find_chrome` теперь резолвит через `installer.resolve_launch_target()` (env → config → default).
 
 Для чекера/ферм: `pinned` + ежемесячный осознанный `huligan chrome update --channel stable`.
 

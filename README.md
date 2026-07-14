@@ -86,6 +86,24 @@ an existing `chrome.exe` to skip resolution entirely.
 | `HULIGAN_RELEASES_REPO` | Override the releases mirror (default `S1d18/huligan-releases`) |
 | `HULIGAN_GH_TOKEN` | GitHub token, only needed if the mirror is private |
 
+### CLI
+
+Installing the package adds a `huligan` command for explicit control over the
+Chrome build (CI, farms, manual ops):
+
+```bash
+huligan chrome list                       # cached builds + what the channel offers
+huligan chrome update --channel latest     # switch channel and download it
+huligan chrome update --check              # report the target, download nothing
+huligan chrome pin 150.0.7871.101          # persist an exact build
+huligan chrome pin --clear                 # back to the default pinned build
+huligan chrome prune --keep 2              # delete old cached builds (protects pinned + current)
+huligan version                            # SDK / Chrome / .conf schema versions
+```
+
+The persisted channel/pin lives in the cache dir (`config.json`); the
+`HULIGAN_CHROME_CHANNEL` env var always overrides it.
+
 ## Quick Start
 
 ### Minimal — proxy only (everything auto-generated)

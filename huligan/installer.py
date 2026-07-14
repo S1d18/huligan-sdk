@@ -88,6 +88,93 @@ def _manifest_cache_path() -> Path:
     return _cache_root() / "manifest.json"
 
 
+def _config_path() -> Path:
+    """Persisted CLI config (channel / exact pin) under the cache root."""
+    return _cache_root() / "config.json"
+
+
+def _load_config() -> dict:
+    """Load the persisted config, or {} if absent/unreadable."""
+    try:
+        return json.loads(_config_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_config(cfg: dict) -> None:
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def effective_channel() -> Tuple[str, str]:
+    """The channel in force and where it came from: (channel, "env"|"config"|"default").
+
+    ``HULIGAN_CHROME_CHANNEL`` (env) overrides the persisted config, which
+    overrides the built-in ``pinned`` default.
+    """
+    env = os.environ.get("HULIGAN_CHROME_CHANNEL")
+    if env:
+        return env.strip().lower(), "env"
+    cfg = _load_config()
+    if cfg.get("channel"):
+        return str(cfg["channel"]).strip().lower(), "config"
+    return DEFAULT_CHANNEL, "default"
+
+
+def resolve_launch_target() -> Tuple[str, Optional[str]]:
+    """Resolve (version, sha256) for launch, honouring env then persisted config.
+
+    Env override wins whole; only a config ``pinned_version`` pins an exact build
+    (env never carries one). This is the single entry point ``find_chrome`` uses.
+    """
+    channel, source = effective_channel()
+    if channel == "pinned":
+        if source != "env":
+            pinned_version = _load_config().get("pinned_version")
+            if pinned_version:
+                return _resolve_target(str(pinned_version), None)
+        return _resolve_target(None, "pinned")
+    return _resolve_target(None, channel)
+
+
+def _version_key(version: str):
+    """Sort key for dotted numeric versions (e.g. 150.0.7871.101)."""
+    parts = []
+    for chunk in str(version).split("."):
+        parts.append(int(chunk) if chunk.isdigit() else 0)
+    return tuple(parts)
+
+
+def installed_versions() -> list:
+    """Cached Chrome versions that are fully extracted and marked OK, newest first."""
+    root = _cache_root()
+    if not root.is_dir():
+        return []
+    found = []
+    for entry in root.iterdir():
+        if (entry.is_dir()
+                and (entry / "chrome.exe").is_file()
+                and (root / f"{entry.name}.ok").exists()):
+            found.append(entry.name)
+    return sorted(found, key=_version_key, reverse=True)
+
+
+def remove_version(version: str) -> bool:
+    """Delete a cached Chrome version (dir + sentinel). Returns True if anything went."""
+    root = _cache_root()
+    removed = False
+    target = root / version
+    if target.exists():
+        shutil.rmtree(target)
+        removed = True
+    sentinel = root / f"{version}.ok"
+    if sentinel.exists():
+        sentinel.unlink()
+        removed = True
+    return removed
+
+
 def _fetch_manifest(force: bool = False, timeout: float = 10.0) -> dict:
     """Return the release ``manifest.json``, TTL-cached under the cache root.
 

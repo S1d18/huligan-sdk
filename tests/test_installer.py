@@ -244,7 +244,7 @@ def test_find_chrome_uses_channel_cache_hit(cache_dir, monkeypatch):
     vdir.mkdir(parents=True)
     (vdir / "chrome.exe").write_text("x")
 
-    monkeypatch.setattr(installer, "resolve_version", lambda channel: (version, "sha"))
+    monkeypatch.setattr(installer, "resolve_launch_target", lambda: (version, "sha"))
     resolved = chrome_mod.find_chrome()
     assert resolved == (vdir / "chrome.exe").resolve()
 
@@ -356,9 +356,9 @@ def test_find_chrome_degrades_to_pinned_on_incompatible(cache_dir, monkeypatch):
     vdir.mkdir(parents=True)
     (vdir / "chrome.exe").write_text("x")
 
-    def incompatible(channel):
+    def incompatible():
         raise IncompatibleBuildError("needs newer schema")
-    monkeypatch.setattr(installer, "resolve_version", incompatible)
+    monkeypatch.setattr(installer, "resolve_launch_target", incompatible)
 
     # must not raise — degrades to the pinned cached build
     resolved = chrome_mod.find_chrome()

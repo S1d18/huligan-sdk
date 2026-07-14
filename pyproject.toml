@@ -24,6 +24,9 @@ classifiers = [
 ]
 dependencies = ["tqdm>=4.65.0"]
 
+[project.scripts]
+huligan = "huligan.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/S1d18/huligan-sdk"
 Repository = "https://github.com/S1d18/huligan-sdk"

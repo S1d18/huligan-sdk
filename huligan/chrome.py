@@ -51,31 +51,24 @@ def find_chrome(
         if candidate.is_file():
             return candidate.resolve()
 
-    from .installer import ensure_chrome, resolve_version, IncompatibleBuildError, _cache_root
+    from .installer import ensure_chrome, resolve_launch_target, IncompatibleBuildError, _cache_root
     from .version import CHROME_VERSION
 
-    # HULIGAN_CHROME_CHANNEL picks which version this machine tracks. Default
-    # "pinned" reproduces the old behaviour exactly (CHROME_VERSION, no network);
-    # "stable"/"latest" resolve from the release manifest. If manifest resolution
-    # fails (offline + uncached) we degrade to the pinned version so a network
-    # blip never bricks launch.
-    channel = os.environ.get("HULIGAN_CHROME_CHANNEL", "pinned").strip().lower()
-    if channel == "pinned":
+    # The launch target is HULIGAN_CHROME_CHANNEL (env) or the persisted CLI
+    # config, defaulting to "pinned" = CHROME_VERSION with no network. A newer
+    # channel build that this SDK's .conf schema can't feed degrades to the
+    # pinned build (compat gate); any other resolution failure (offline +
+    # uncached) also degrades, so a network blip never bricks launch.
+    try:
+        target_version, _ = resolve_launch_target()
+    except IncompatibleBuildError as exc:
+        print(
+            f"[huligan] {exc}\n"
+            f"[huligan] Using pinned Chrome {CHROME_VERSION} instead."
+        )
         target_version = CHROME_VERSION
-    else:
-        try:
-            target_version, _ = resolve_version(channel)
-        except IncompatibleBuildError as exc:
-            # The channel points at a build newer than this SDK's .conf schema.
-            # Falling back to the pinned build keeps launch working with a
-            # guaranteed-compatible browser instead of a degraded fingerprint.
-            print(
-                f"[huligan] {exc}\n"
-                f"[huligan] Using pinned Chrome {CHROME_VERSION} instead."
-            )
-            target_version = CHROME_VERSION
-        except Exception:
-            target_version = CHROME_VERSION
+    except Exception:
+        target_version = CHROME_VERSION
 
     cached = _cache_root() / target_version / "chrome.exe"
     if cached.is_file():

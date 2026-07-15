@@ -24,12 +24,20 @@ from typing import Dict, List
 
 from .webgl_profiles import classify_gpu, get_extensions, get_webgl_params
 
-# Run this in a real Chrome console per GPU class to capture authoritative limits:
-#   copy(JSON.stringify(Object.fromEntries(
-#     [...Object.entries((await navigator.gpu.requestAdapter()).limits)])))
+# Run this in a real Chrome console per GPU class to capture authoritative limits.
+# NOTE: GPUSupportedLimits exposes each limit as a PROTOTYPE getter, so Object.entries() /
+# Object.keys() see no own properties and return "{}". Walk the prototype's property names:
+#   await (async () => {
+#     const L = (await navigator.gpu.requestAdapter()).limits;
+#     return JSON.stringify(Object.fromEntries(
+#       Object.getOwnPropertyNames(Object.getPrototypeOf(L))
+#         .filter(k => typeof L[k] === "number").map(k => [k, L[k]])));
+#   })()
 WEBGPU_LIMIT_CAPTURE_JS = (
-    "JSON.stringify(Object.fromEntries("
-    "[...Object.entries((await navigator.gpu.requestAdapter()).limits)]))"
+    "await (async () => { const L = (await navigator.gpu.requestAdapter()).limits; "
+    "return JSON.stringify(Object.fromEntries("
+    "Object.getOwnPropertyNames(Object.getPrototypeOf(L))"
+    ".filter(k => typeof L[k] === 'number').map(k => [k, L[k]]))); })()"
 )
 
 

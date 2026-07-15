@@ -68,3 +68,16 @@ def test_webgpu_arch():
     assert gi.webgpu_adapter_for(R("NVIDIA", _RTX4090, os_family="windows")).architecture == "ampere"
     assert gi.webgpu_adapter_for(R("Apple", _APPLE, os_family="macos")).architecture == "apple-silicon"
     assert gi.webgpu_adapter_for(R("AMD", _RX7900, os_family="windows")).architecture == "rdna3"
+
+
+def test_webgpu_limits_are_native_not_dolphin_clamped():
+    # Native Chrome (GTX 1060 capture) reports 16384/2048/48; Dolphin Anty CLAMPS to 8192/256/16
+    # (a tell). We present the native set, same across GPU classes (D3D11-feature-level driven).
+    a_nv = gi.webgpu_adapter_for(gi.resolve_gpu_identity("NVIDIA", _RTX4090, os_family="windows"))
+    a_amd = gi.webgpu_adapter_for(gi.resolve_gpu_identity("AMD", _VEGA, os_family="windows"))
+    assert a_nv.limits == a_amd.limits
+    L = a_nv.limits
+    assert L["maxTextureDimension2D"] == 16384           # native (Dolphin clamps to 8192)
+    assert L["maxTextureArrayLayers"] == 2048            # native (Dolphin clamps to 256)
+    assert L["maxSampledTexturesPerShaderStage"] == 48   # native (Dolphin clamps to 16)
+    assert L["maxBufferSize"] == 2147483648

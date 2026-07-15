@@ -93,24 +93,34 @@ _FEATURES_COMMON = ["depth-clip-control", "depth32float-stencil8",
                     "texture-compression-bc", "indirect-first-instance",
                     "rg11b10ufloat-renderable"]
 
-# REFERENCE values only (WebGPU-spec-informed, >= spec guaranteed minimums). VERIFY per class
-# against real captures (WEBGPU_LIMIT_CAPTURE_JS) before wiring into emitter output.
-_DISCRETE = {"maxBufferSize": 4294967296, "maxStorageBufferBindingSize": 2147483644,
-             "maxComputeWorkgroupSizeX": 1024, "maxComputeWorkgroupSizeY": 1024,
-             "maxComputeWorkgroupSizeZ": 64, "maxComputeInvocationsPerWorkgroup": 1024}
-_INTEGRATED = {"maxBufferSize": 2147483648, "maxStorageBufferBindingSize": 2147483644,
-               "maxComputeWorkgroupSizeX": 1024, "maxComputeWorkgroupSizeY": 1024,
-               "maxComputeWorkgroupSizeZ": 64, "maxComputeInvocationsPerWorkgroup": 1024}
-WEBGPU_LIMITS_BY_CLASS = {
-    "nvidia_high": dict(_DISCRETE),
-    "nvidia_mid": dict(_DISCRETE),
-    "amd_discrete": dict(_DISCRETE),
-    "amd_integrated": dict(_INTEGRATED),
-    "intel_integrated": dict(_INTEGRATED),
-    "intel_discrete": dict(_DISCRETE),
-    "apple": {"maxBufferSize": 4294967296, "maxStorageBufferBindingSize": 4294967292,
-              "maxComputeWorkgroupSizeX": 1024, "maxComputeWorkgroupSizeY": 1024,
-              "maxComputeWorkgroupSizeZ": 64, "maxComputeInvocationsPerWorkgroup": 1024},
+# REAL captured WebGPU limits. CRITICAL antidetect finding from comparing NATIVE Chrome vs
+# Dolphin Anty captures (2026-07):
+#   * Dolphin Anty CLAMPS WebGPU limits to the spec guaranteed-MINIMUM tier (maxTextureDimension2D
+#     8192, maxTextureArrayLayers 256, maxSampledTexturesPerShaderStage 16, maxVertexAttributes 16,
+#     maxColorAttachmentBytesPerSample 32) - and reports it identically across GPUs. All-at-spec-min
+#     is itself an antidetect TELL; do NOT copy it.
+#   * NATIVE (unspoofed) Chrome reports the real D3D11-feature-level values, which are HIGHER:
+#     16384 / 2048 / 48 / 30 / 28 / 128 (captured on a GTX 1060, native Chrome). These are driven by
+#     the D3D11 feature level, so they are ~constant across modern NVIDIA/AMD/Intel on Chrome -
+#     CONFIRM with native AMD/Intel captures, and pin from the shipped 150 headed window before wiring.
+# We present the NATIVE set below so we look like real Chrome, not like a clamped antidetect browser.
+WEBGPU_LIMITS_DEFAULT = {
+    "maxTextureDimension1D": 16384, "maxTextureDimension2D": 16384, "maxTextureDimension3D": 2048,
+    "maxTextureArrayLayers": 2048, "maxBindGroups": 4, "maxBindGroupsPlusVertexBuffers": 24,
+    "maxBindingsPerBindGroup": 1000, "maxDynamicUniformBuffersPerPipelineLayout": 10,
+    "maxDynamicStorageBuffersPerPipelineLayout": 8, "maxSampledTexturesPerShaderStage": 48,
+    "maxSamplersPerShaderStage": 16, "maxStorageBuffersPerShaderStage": 16,
+    "maxStorageTexturesPerShaderStage": 8, "maxUniformBuffersPerShaderStage": 12,
+    "maxUniformBufferBindingSize": 65536, "maxStorageBufferBindingSize": 2147483644,
+    "minUniformBufferOffsetAlignment": 256, "minStorageBufferOffsetAlignment": 256,
+    "maxVertexBuffers": 8, "maxBufferSize": 2147483648, "maxVertexAttributes": 30,
+    "maxVertexBufferArrayStride": 2048, "maxInterStageShaderVariables": 28, "maxColorAttachments": 8,
+    "maxColorAttachmentBytesPerSample": 128, "maxComputeWorkgroupStorageSize": 32768,
+    "maxComputeInvocationsPerWorkgroup": 1024, "maxComputeWorkgroupSizeX": 1024,
+    "maxComputeWorkgroupSizeY": 1024, "maxComputeWorkgroupSizeZ": 64,
+    "maxComputeWorkgroupsPerDimension": 65535, "maxImmediateSize": 64,
+    "maxStorageBuffersInFragmentStage": 16, "maxStorageTexturesInFragmentStage": 8,
+    "maxStorageBuffersInVertexStage": 16, "maxStorageTexturesInVertexStage": 8,
 }
 
 
@@ -169,7 +179,7 @@ def webgpu_adapter_for(identity: GpuIdentity) -> WebGpuAdapter:
     before wiring the emitter. Total over every known class; raises on an unknown class.
     """
     cls = identity.gpu_class
-    if cls not in WEBGPU_LIMITS_BY_CLASS:
+    if cls not in _WEBGPU_VENDOR_BY_CLASS:
         raise GpuDataUnavailable(f"no WebGPU adapter data for GPU class {cls!r}")
     smin, smax = _SUBGROUP_BY_CLASS[cls]
     return WebGpuAdapter(
@@ -177,7 +187,9 @@ def webgpu_adapter_for(identity: GpuIdentity) -> WebGpuAdapter:
         architecture=_arch_for(cls, identity.renderer_string),
         device=identity.device_id,
         description=identity.renderer_string,
-        limits=dict(WEBGPU_LIMITS_BY_CLASS[cls]),
+        # Native-Chrome D3D11 limits (NOT Dolphin's spec-min clamp, NOT the real host GPU passthrough
+        # that would leak the true adapter and contradict the spoofed webgl_renderer).
+        limits=dict(WEBGPU_LIMITS_DEFAULT),
         features=list(_FEATURES_COMMON),
         subgroup_min_size=smin,
         subgroup_max_size=smax,

@@ -40,6 +40,7 @@ _HAS_MOUSE_KB = False
 try:
     from .automation.mouse import human_like_mouse_click
     from .automation.keyboard import human_like_type, human_like_hotkey
+    from .automation.humanize import patch_page, patch_context, unpatch_page, HUMAN_PRESETS
     _HAS_MOUSE_KB = True
 except ImportError:
     pass  # Needs huligan[automation] (pytweening, loguru)
@@ -125,7 +126,8 @@ __all__ = [
     "write_profile_bundle",
 ]
 if _HAS_MOUSE_KB:
-    __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey"]
+    __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey",
+                "patch_page", "patch_context", "unpatch_page", "HUMAN_PRESETS"]
 if _HAS_SCROLL_IDLE:
     __all__ += [
         "human_like_scroll", "human_like_scroll_to_top",

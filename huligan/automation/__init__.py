@@ -46,3 +46,9 @@ try:
     from .keyboard import human_like_type, human_like_hotkey
 except ImportError:
     pass
+
+# Transparent humanize dispatch layer — needs mouse/keyboard (pytweening + loguru)
+try:
+    from .humanize import patch_page, patch_context, unpatch_page, HUMAN_PRESETS
+except ImportError:
+    pass

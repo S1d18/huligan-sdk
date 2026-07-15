@@ -77,6 +77,7 @@ class Browser:
         headless: bool = False,
         user_data_dir: Union[str, Path, None] = None,
         extra_args: Optional[list] = None,
+        humanize: Union[bool, str, dict] = False,
     ):
         """
         Args:
@@ -97,6 +98,7 @@ class Browser:
         self._proxy_type_override = proxy_type
         self._profile_path_input = profile_path
         self._fingerprint_opts = fingerprint or {}
+        self._humanize = humanize
         self._timezone_override = timezone
         self._language_override = language
         self._cdp_port_input = cdp_port
@@ -328,6 +330,13 @@ class Browser:
 
         context = self._pw_browser.contexts[0] if self._pw_browser.contexts else await self._pw_browser.new_context()
         page = await context.new_page()
+        if self._humanize:
+            from .automation.humanize import patch_context, patch_page
+            hz = self._humanize
+            preset = hz if isinstance(hz, str) else "default"
+            hconf = hz if isinstance(hz, dict) else None
+            patch_context(context, preset=preset, human_config=hconf)
+            patch_page(page, preset=preset, human_config=hconf)
         return page
 
     async def _cookie_page(self):

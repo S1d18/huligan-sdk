@@ -14,9 +14,10 @@ resolution logic of its own.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from . import installer
+from . import doctor, installer
 from .conf_spec import CONF_SCHEMA_VERSION
 from .version import CHROME_VERSION, get_version
 
@@ -183,12 +184,33 @@ def _cmd_version(_args) -> int:
     return 0
 
 
+def _cmd_doctor(args) -> int:
+    report = doctor.run_checks(quick=args.quick)
+    print(doctor.render_json(report) if args.json else doctor.render_text(report))
+    return 1 if report.overall == "fail" else 0
+
+
+def _cmd_info(args) -> int:
+    info = doctor.collect_info()
+    print(json.dumps(info, indent=2) if args.json else doctor.render_info_text(info))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="huligan", description="Huligan Antidetect SDK CLI")
     sub = parser.add_subparsers(dest="group", required=True)
 
     sub.add_parser("version", help="show SDK / Chrome / schema versions").set_defaults(
         func=_cmd_version)
+
+    doc = sub.add_parser("doctor", help="run consolidated self-check (binary, launch, geoip, fonts, deps)")
+    doc.add_argument("--json", action="store_true", help="machine-readable output")
+    doc.add_argument("--quick", action="store_true", help="skip launch smoke-test and network checks")
+    doc.set_defaults(func=_cmd_doctor)
+
+    inf = sub.add_parser("info", help="static SDK / Chrome / paths / extras metadata")
+    inf.add_argument("--json", action="store_true", help="machine-readable output")
+    inf.set_defaults(func=_cmd_info)
 
     chrome = sub.add_parser("chrome", help="manage the patched Chrome build")
     csub = chrome.add_subparsers(dest="cmd", required=True)

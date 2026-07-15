@@ -214,6 +214,18 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _cmd_validate(args) -> int:
+    from . import coherence
+    report = coherence.validate_conf(args.profile, binary_os=args.binary_os)
+    if not report.violations:
+        print("  OK - no coherence violations")
+    for v in report.violations:
+        print(f"  [{v.severity.name:<5}] {v.code}: {v.message}")
+    print(f"  {len(report.violations)} violation(s), {len(report.errors)} error(s) - "
+          f"{'PASS' if report.ok else 'FAIL'}")
+    return 0 if report.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="huligan", description="Huligan Antidetect SDK CLI")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -245,6 +257,12 @@ def build_parser() -> argparse.ArgumentParser:
     srv.add_argument("--allow-origin", action="append", help="extra allowed Origin (repeatable)")
     srv.add_argument("--max-processes", type=int, default=0, help="cap concurrent served processes (0 = unlimited)")
     srv.set_defaults(func=_cmd_serve)
+
+    val = sub.add_parser("validate", help="check a profile .conf for cross-attribute coherence")
+    val.add_argument("profile", help="path to a .conf file")
+    val.add_argument("--binary-os", default="windows", choices=["windows", "macos", "linux"],
+                     help="OS of the target build (default windows - the only shipping target)")
+    val.set_defaults(func=_cmd_validate)
 
     chrome = sub.add_parser("chrome", help="manage the patched Chrome build")
     csub = chrome.add_subparsers(dest="cmd", required=True)

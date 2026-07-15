@@ -23,6 +23,14 @@ from .installer import (
     IncompatibleBuildError,
 )
 from .conf_spec import CONF_SCHEMA_VERSION
+from .coherence import (
+    Severity,
+    Violation,
+    CoherenceReport,
+    CoherenceError,
+    validate_profile,
+    validate_conf,
+)
 from .profile_bundle import (
     extract_profile_bundle,
     read_profile_bundle,
@@ -121,6 +129,12 @@ __all__ = [
     "is_installed",
     "IncompatibleBuildError",
     "CONF_SCHEMA_VERSION",
+    "validate_profile",
+    "validate_conf",
+    "CoherenceReport",
+    "Violation",
+    "Severity",
+    "CoherenceError",
     "extract_profile_bundle",
     "read_profile_bundle",
     "write_profile_bundle",

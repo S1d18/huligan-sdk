@@ -546,7 +546,9 @@ class FingerprintGenerator:
         canvas_seed = (base_seed + 0x1111) & 0xFFFFFFFF
         # audio_noise_seed is always 0 — disabled: BrowserScan detects noise as modified manually
         font_seed = (base_seed + 0x3333) & 0xFFFFFFFF
-        client_rects_seed = (base_seed + 0x4444) & 0xFFFFFFFF
+        # client_rects_noise_seed is always 0 — DOMRect noise is a no-op in the
+        # binary (Phase 3.4) and non-zero seeds read as a CreepJS "lie"
+        client_rects_seed = 0
 
         fonts = get_random_fonts(platform, count=None, rng=self.rng)
 

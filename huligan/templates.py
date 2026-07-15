@@ -32,7 +32,7 @@ TEMPLATES: Dict[str, Dict] = {
             "outer_height": 1080,
             "device_pixel_ratio": 1.0,
             "cpu_cores": 8,
-            "device_memory": 16,
+            "device_memory": 8,
             "platform": "Win32",
             "max_touch_points": 0,
             "webgl_vendor": "Google Inc. (NVIDIA)",
@@ -131,7 +131,7 @@ TEMPLATES: Dict[str, Dict] = {
             "outer_height": 1440,
             "device_pixel_ratio": 1.0,
             "cpu_cores": 12,
-            "device_memory": 32,
+            "device_memory": 8,
             "platform": "Win32",
             "max_touch_points": 0,
             "webgl_vendor": "Google Inc. (NVIDIA)",
@@ -197,7 +197,7 @@ TEMPLATES: Dict[str, Dict] = {
             "outer_height": 1440,
             "device_pixel_ratio": 2.0,
             "cpu_cores": 8,
-            "device_memory": 16,
+            "device_memory": 8,
             "platform": "MacIntel",
             "max_touch_points": 0,
             "webgl_vendor": "Google Inc. (Apple)",
@@ -225,7 +225,7 @@ TEMPLATES: Dict[str, Dict] = {
 TEMPLATE_DESCRIPTIONS: Dict[str, str] = {
     "usa_verified_facebook": (
         "US Windows desktop, NVIDIA RTX 3060, 1920x1080, en-US, "
-        "America/New_York, 8 cores / 16 GB."
+        "America/New_York, 8 cores / 8 GB."
     ),
     "usa_office_chrome": (
         "US office worker, Intel UHD 770, 1920x1080, en-US, "
@@ -237,7 +237,7 @@ TEMPLATE_DESCRIPTIONS: Dict[str, str] = {
     ),
     "apac_crypto_exchange": (
         "APAC gaming workstation, NVIDIA RTX 3070, 2560x1440, en-US, "
-        "Asia/Singapore, 12 cores / 32 GB."
+        "Asia/Singapore, 12 cores / 8 GB."
     ),
     "latam_casual_browsing": (
         "LatAm modest hardware, AMD RX 5600 XT, 1366x768, es-MX, "
@@ -245,7 +245,7 @@ TEMPLATE_DESCRIPTIONS: Dict[str, str] = {
     ),
     "macos_developer": (
         "macOS dev box, Apple M2, 2560x1440 @2x, en-US, "
-        "America/Los_Angeles, 8 cores / 16 GB."
+        "America/Los_Angeles, 8 cores / 8 GB."
     ),
 }
 

@@ -541,6 +541,26 @@ def ensure_chrome(
     return chrome_exe
 
 
+def ensure_binary(
+    version: Optional[str] = None,
+    *,
+    channel: Optional[str] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> Path:
+    """Return the path to the patched Huligan Chrome, downloading + caching if needed.
+
+    Public integration primitive - a thin alias of :func:`ensure_chrome` with a
+    name that reads correctly at a third-party call site::
+
+        options.binary_location = huligan.ensure_binary()
+
+    Always resolves the *patched* build. Unlike :func:`huligan.find_chrome`, it
+    never falls back to a vanilla system Chrome found on ``PATH`` - so an
+    integration whose contract is "the patched binary" gets exactly that.
+    """
+    return ensure_chrome(version, progress_callback, channel=channel)
+
+
 def is_installed(version: str = CHROME_VERSION) -> bool:
     """True if ``version`` is already extracted and marked OK in the cache."""
     root = _cache_root()

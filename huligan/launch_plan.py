@@ -26,6 +26,13 @@ from pathlib import Path
 from typing import Optional, Tuple, Union
 
 
+# Always-on, runtime-independent stealth features (build_launch_plan annotates
+# WHY these two TLS features are pinned OFF, at the use site below). Shared with
+# get_default_stealth_args() so the command-line pins and the public integration
+# primitive have exactly ONE definition and can never drift on a Chrome upgrade.
+_STEALTH_DISABLE_FEATURES = ("TLSTrustAnchorIDs", "TlsMldsaSignatures")
+
+
 def build_launch_plan(
     *,
     chrome_path: Union[str, Path],
@@ -110,25 +117,14 @@ def build_launch_plan(
     # Features to disable, emitted as a SINGLE --disable-features switch.
     # Chrome keeps only the last --disable-features on the command line, so we
     # must collect everything here and join once — never append the switch twice.
-    disable_features = [
-        # Trust Anchor IDs (TLS ClientHello extension 0xCA34) is a gradual-
-        # rollout feature: net::features::kTLSTrustAnchorIDs is disabled by
-        # default in source, but the variations/Finch seed flips it ON for some
-        # sessions. When ON, BoringSSL advertises the trust_anchors extension,
-        # which pushes our JA4 from t13d1517h2 (canonical Chrome, feature OFF) to
-        # t13d1518h2 — a non-Chrome TLS fingerprint WAFs (SafeLine etc.) flag.
-        # The seed toggling it is what makes detection intermittent ("works every
-        # other time"). Pin it OFF so JA4 always matches stock Chrome.
-        # (Verified: stock Google Chrome with this pin emits the identical JA4
-        # t13d1517h2_8daaf6152771_b6f405a00624 — measured against 149 patched and
-        # 150 stock. An earlier "t13d1516h2 / 16 ext" note here was off by one.)
-        "TLSTrustAnchorIDs",
-        # Same class: net::features::kTlsMldsaSignatures (ML-DSA, draft-ietf-tls-
-        # mldsa) is disabled by default but Finch can flip it on, which adds
-        # ML-DSA codepoints to signature_algorithms and shifts JA4 again. Pin
-        # off too so the whole TLS surface stays deterministic and Chrome-like.
-        "TlsMldsaSignatures",
-    ]
+    # These two TLS features are gradual-rollout / Finch-flippable and live in
+    # _STEALTH_DISABLE_FEATURES (module top): kTLSTrustAnchorIDs adds ClientHello
+    # ext 0xCA34 (JA4 t13d1517h2 -> t13d1518h2, a non-Chrome TLS fingerprint WAFs
+    # like SafeLine flag); kTlsMldsaSignatures adds ML-DSA codepoints to
+    # signature_algorithms. Pinned OFF so JA4 always matches stock Chrome
+    # (t13d1517h2_8daaf6152771_b6f405a00624, measured against 149 patched / 150
+    # stock). The Finch seed toggling them is what made detection intermittent.
+    disable_features = list(_STEALTH_DISABLE_FEATURES)
 
     # Language from GeoIP
     if language:
@@ -165,6 +161,31 @@ def build_launch_plan(
         env["HULIGAN_CDP_MODE"] = cdp_mode
 
     return args, env
+
+
+def get_default_stealth_args() -> list:
+    """Canonical always-on stealth flags for launching the patched binary under
+    an external driver (Selenium / undetected-chromedriver / any tool that takes
+    ``binary_location`` + args).
+
+    Returns exactly the runtime-INDEPENDENT subset::
+
+        --no-sandbox
+        --disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures
+
+    Deliberately EXCLUDED (they need runtime values you supply yourself):
+      * proxy / host-resolver / WebRTC leak flags (need the proxy + spoof IP)
+      * --lang / --accept-lang                    (need the resolved Accept-Language)
+      * --remote-debugging-port / --user-data-dir (owned by the driver)
+      * --headless=new
+
+    Want those wired for free? Don't launch Chrome yourself - launch via
+    :func:`huligan.launch_persistent` and hand its ``.cdp_url`` to your tool.
+
+    WARNING: Chrome keeps only the LAST ``--disable-features`` switch. If you add
+    your own, MERGE these feature names into it, or you silently drop the JA4 pins.
+    """
+    return ["--no-sandbox", "--disable-features=" + ",".join(_STEALTH_DISABLE_FEATURES)]
 
 
 def cdp_mode_from_conf(profile_path: Union[str, Path, None]) -> Optional[str]:

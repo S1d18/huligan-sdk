@@ -16,6 +16,7 @@ from .proxy import ProxyForwarder, parse_proxy_string
 from .chrome import find_chrome
 from .installer import (
     ensure_chrome,
+    ensure_binary,
     resolve_version,
     latest_version,
     is_installed,
@@ -27,7 +28,7 @@ from .profile_bundle import (
     read_profile_bundle,
     write_profile_bundle,
 )
-from .launch_plan import build_launch_plan
+from .launch_plan import build_launch_plan, get_default_stealth_args
 from .persistent import launch_persistent, LaunchSession, LaunchResult
 
 # Human-like automation helpers (CDP-compatible). Each block is
@@ -100,6 +101,7 @@ __all__ = [
     "LaunchSession",
     "LaunchResult",
     "build_launch_plan",
+    "get_default_stealth_args",
     "FingerprintGenerator",
     "FingerprintProfile",
     "GeoIPManager",
@@ -108,6 +110,7 @@ __all__ = [
     "parse_proxy_string",
     "find_chrome",
     "ensure_chrome",
+    "ensure_binary",
     "resolve_version",
     "latest_version",
     "is_installed",

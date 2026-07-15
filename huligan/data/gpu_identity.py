@@ -93,17 +93,18 @@ _FEATURES_COMMON = ["depth-clip-control", "depth32float-stencil8",
                     "texture-compression-bc", "indirect-first-instance",
                     "rg11b10ufloat-renderable"]
 
-# REAL captured WebGPU limits. CRITICAL antidetect finding from comparing NATIVE Chrome vs
-# Dolphin Anty captures (2026-07):
-#   * Dolphin Anty CLAMPS WebGPU limits to the spec guaranteed-MINIMUM tier (maxTextureDimension2D
-#     8192, maxTextureArrayLayers 256, maxSampledTexturesPerShaderStage 16, maxVertexAttributes 16,
-#     maxColorAttachmentBytesPerSample 32) - and reports it identically across GPUs. All-at-spec-min
-#     is itself an antidetect TELL; do NOT copy it.
-#   * NATIVE (unspoofed) Chrome reports the real D3D11-feature-level values, which are HIGHER:
-#     16384 / 2048 / 48 / 30 / 28 / 128 (captured on a GTX 1060, native Chrome). These are driven by
-#     the D3D11 feature level, so they are ~constant across modern NVIDIA/AMD/Intel on Chrome -
-#     CONFIRM with native AMD/Intel captures, and pin from the shipped 150 headed window before wiring.
-# We present the NATIVE set below so we look like real Chrome, not like a clamped antidetect browser.
+# REAL captured WebGPU limits. Comparing NATIVE Chrome vs Dolphin Anty captures (2026-07):
+#   * The Dolphin profiles reported maxTextureDimension2D=8192 / arrayLayers=256 / sampledTextures=16
+#     IDENTICALLY, even across profiles whose spoofed webgl_renderer claimed very different GPUs
+#     (incl. an "RTX 3070 Ti"). 8192 is the D3D FEATURE-LEVEL-10 texture cap; 16384 is FL 11+. So
+#     those low values are almost certainly the REAL WebGPU of the weak/old HOST machines: Dolphin
+#     spoofs webgl_renderer but PASSES WebGPU LIMITS THROUGH. That makes a Dolphin profile claiming a
+#     strong GPU on a weak host INCOHERENT (WebGL says RTX 3070 Ti, WebGPU says an FL-10 host) = a tell.
+#   * NATIVE modern Chrome reports the FL 11+ values: 16384 / 2048 / 48 / 30 / 28 / 128 (GTX 1060).
+#   THE WIN over Dolphin: make WebGPU limits COHERENT with the CLAIMED GPU's tier (they don't). Our
+#   profiles all claim MODERN GPUs, so we present the modern native set below; a weak/old-GPU claim
+#   would need the FL-10 set instead (a T3.2 C20 coherence rule). Confirm the modern set is
+#   vendor-constant with native AMD/Intel captures; pin from the shipped 150 build before wiring.
 WEBGPU_LIMITS_DEFAULT = {
     "maxTextureDimension1D": 16384, "maxTextureDimension2D": 16384, "maxTextureDimension3D": 2048,
     "maxTextureArrayLayers": 2048, "maxBindGroups": 4, "maxBindGroupsPlusVertexBuffers": 24,

@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
-from . import doctor, installer
+from . import doctor, installer, serve
 from .conf_spec import CONF_SCHEMA_VERSION
 from .version import CHROME_VERSION, get_version
 
@@ -196,6 +197,23 @@ def _cmd_info(args) -> int:
     return 0
 
 
+def _cmd_serve(args) -> int:
+    serve.serve(
+        host=args.host,
+        port=args.port,
+        idle_timeout=args.idle_timeout,
+        cdp_mode=args.cdp_mode,
+        proxy=args.proxy,
+        token=args.token or os.environ.get("HULIGAN_SERVE_TOKEN"),
+        serve_root=args.serve_root,
+        headless=not args.headed,
+        geoip=not args.no_geoip,
+        allow_origins=tuple(args.allow_origin or ()),
+        max_processes=args.max_processes,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="huligan", description="Huligan Antidetect SDK CLI")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -211,6 +229,22 @@ def build_parser() -> argparse.ArgumentParser:
     inf = sub.add_parser("info", help="static SDK / Chrome / paths / extras metadata")
     inf.add_argument("--json", action="store_true", help="machine-readable output")
     inf.set_defaults(func=_cmd_info)
+
+    srv = sub.add_parser("serve", help="persistent CDP multiplexer: one port, one Chrome per fingerprint seed")
+    srv.add_argument("--host", default="127.0.0.1", help="bind host (non-loopback requires --token)")
+    srv.add_argument("--port", type=int, default=9222, help="bind port (default 9222)")
+    srv.add_argument("--idle-timeout", type=float, default=300.0,
+                     help="seconds before an idle seed's Chrome is stopped (default 300)")
+    srv.add_argument("--cdp-mode", choices=["isolated", "paranoid"], default="isolated",
+                     help="served-process CDP mode (isolated keeps Runtime.evaluate working)")
+    srv.add_argument("--proxy", help="upstream proxy applied to every served process")
+    srv.add_argument("--token", help="bearer token required to connect (or HULIGAN_SERVE_TOKEN)")
+    srv.add_argument("--serve-root", help="per-seed profile/data root (default ~/.huligan/serve)")
+    srv.add_argument("--headed", action="store_true", help="launch served Chrome headed (default headless)")
+    srv.add_argument("--no-geoip", action="store_true", help="skip GeoIP per spawn (faster cold start)")
+    srv.add_argument("--allow-origin", action="append", help="extra allowed Origin (repeatable)")
+    srv.add_argument("--max-processes", type=int, default=0, help="cap concurrent served processes (0 = unlimited)")
+    srv.set_defaults(func=_cmd_serve)
 
     chrome = sub.add_parser("chrome", help="manage the patched Chrome build")
     csub = chrome.add_subparsers(dest="cmd", required=True)

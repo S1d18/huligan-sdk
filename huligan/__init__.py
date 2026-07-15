@@ -30,6 +30,7 @@ from .profile_bundle import (
 )
 from .launch_plan import build_launch_plan, get_default_stealth_args
 from .persistent import launch_persistent, LaunchSession, LaunchResult
+from .serve import run_serve, ServeConfig, ServeMux
 
 # Human-like automation helpers (CDP-compatible). Each block is
 # imported independently — installing pip extras only for the helpers
@@ -100,6 +101,9 @@ __all__ = [
     "launch_persistent",
     "LaunchSession",
     "LaunchResult",
+    "run_serve",
+    "ServeConfig",
+    "ServeMux",
     "build_launch_plan",
     "get_default_stealth_args",
     "FingerprintGenerator",

@@ -128,6 +128,41 @@ WEBGPU_LIMITS_DEFAULT = {
     "maxStorageBuffersInVertexStage": 16, "maxStorageTexturesInVertexStage": 8,
 }
 
+# Real captured WebGL2 getParameter values (native Chrome, Windows/D3D11/ANGLE), keyed by GL enum.
+# BYTE-IDENTICAL across native V100 / GTX 1650 / GTX 660 (Volta/Turing/Kepler) AND across Dolphin
+# profiles - Dolphin passes these THROUGH (it spoofs only the renderer STRING, not the numbers),
+# so unlike WebGPU there is no Dolphin tell here. These fingerprint-critical params are an
+# ANGLE-D3D11 constant, vendor-scoped (NVIDIA confirmed; AMD/Intel to capture), NOT per-GPU.
+# GROUND TRUTH for the T2.3 rebuild: reconcile webgl_profiles.py's per-class NVIDIA tables to this
+# (its 34076=32768 in some classes is impossible on D3D11 - real MAX_CUBE_MAP=16384) and fix its
+# GL_ENUM_NAMES labels (34045/34047/36347/36348/36349 are mislabelled). Value edits change the
+# fingerprint -> operator BrowserScan/CreepJS validation at the rebuild. Names below are canonical.
+GL_PARAMS_NATIVE = {
+    "nvidia": {
+        3379: 16384,           # MAX_TEXTURE_SIZE
+        3386: [32767, 32767],  # MAX_VIEWPORT_DIMS
+        33901: [1, 1024],      # ALIASED_POINT_SIZE_RANGE
+        33902: [1, 1],         # ALIASED_LINE_WIDTH_RANGE
+        34024: 16384,          # MAX_RENDERBUFFER_SIZE
+        34045: 2,              # MAX_TEXTURE_LOD_BIAS
+        34047: 16,             # MAX_TEXTURE_MAX_ANISOTROPY_EXT
+        34076: 16384,          # MAX_CUBE_MAP_TEXTURE_SIZE
+        34921: 16,             # MAX_VERTEX_ATTRIBS
+        34930: 16,             # MAX_TEXTURE_IMAGE_UNITS
+        35371: 12,             # MAX_VERTEX_UNIFORM_BLOCKS
+        35373: 12,             # MAX_FRAGMENT_UNIFORM_BLOCKS
+        35374: 24,             # MAX_COMBINED_UNIFORM_BLOCKS
+        35375: 24,             # MAX_UNIFORM_BUFFER_BINDINGS
+        35377: 212988,         # MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS
+        35379: 200704,         # MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS
+        35660: 16,             # MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        35661: 32,             # MAX_COMBINED_TEXTURE_IMAGE_UNITS
+        36347: 4095,           # MAX_VERTEX_UNIFORM_VECTORS
+        36348: 30,             # MAX_VARYING_VECTORS
+        36349: 1024,           # MAX_FRAGMENT_UNIFORM_VECTORS
+    },
+}
+
 
 def _is_apple(renderer: str, vendor: str) -> bool:
     s = f"{renderer} {vendor}".lower()

@@ -81,3 +81,13 @@ def test_webgpu_limits_are_native_not_dolphin_clamped():
     assert L["maxTextureArrayLayers"] == 2048            # native (Dolphin clamps to 256)
     assert L["maxSampledTexturesPerShaderStage"] == 48   # native (Dolphin clamps to 16)
     assert L["maxBufferSize"] == 2147483648
+
+
+def test_gl_params_native_ground_truth():
+    # Real captured NVIDIA WebGL2 params - byte-identical across native V100/1650/660 + Dolphin.
+    nv = gi.GL_PARAMS_NATIVE["nvidia"]
+    assert nv[3379] == 16384            # MAX_TEXTURE_SIZE
+    assert nv[34076] == 16384           # MAX_CUBE_MAP (webgl_profiles has 32768 in a class = bug)
+    assert nv[34047] == 16              # MAX_TEXTURE_MAX_ANISOTROPY_EXT
+    assert nv[36347] == 4095            # MAX_VERTEX_UNIFORM_VECTORS
+    assert nv[3386] == [32767, 32767]   # MAX_VIEWPORT_DIMS

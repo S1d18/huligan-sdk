@@ -93,18 +93,22 @@ _FEATURES_COMMON = ["depth-clip-control", "depth32float-stencil8",
                     "texture-compression-bc", "indirect-first-instance",
                     "rg11b10ufloat-renderable"]
 
-# REAL captured WebGPU limits. Comparing NATIVE Chrome vs Dolphin Anty captures (2026-07):
-#   * The Dolphin profiles reported maxTextureDimension2D=8192 / arrayLayers=256 / sampledTextures=16
-#     IDENTICALLY, even across profiles whose spoofed webgl_renderer claimed very different GPUs
-#     (incl. an "RTX 3070 Ti"). 8192 is the D3D FEATURE-LEVEL-10 texture cap; 16384 is FL 11+. So
-#     those low values are almost certainly the REAL WebGPU of the weak/old HOST machines: Dolphin
-#     spoofs webgl_renderer but PASSES WebGPU LIMITS THROUGH. That makes a Dolphin profile claiming a
-#     strong GPU on a weak host INCOHERENT (WebGL says RTX 3070 Ti, WebGPU says an FL-10 host) = a tell.
-#   * NATIVE modern Chrome reports the FL 11+ values: 16384 / 2048 / 48 / 30 / 28 / 128 (GTX 1060).
-#   THE WIN over Dolphin: make WebGPU limits COHERENT with the CLAIMED GPU's tier (they don't). Our
-#   profiles all claim MODERN GPUs, so we present the modern native set below; a weak/old-GPU claim
-#   would need the FL-10 set instead (a T3.2 C20 coherence rule). Confirm the modern set is
-#   vendor-constant with native AMD/Intel captures; pin from the shipped 150 build before wiring.
+# REAL captured WebGPU limits - CONFIRMED by four NATIVE NVIDIA captures spanning 2012-2019:
+# Tesla V100 (Volta), GTX 1650 (Turing), GTX 1060 (Pascal) and GTX 660 (Kepler) all returned the
+# BYTE-IDENTICAL set below. So Windows/D3D11 WebGPU limits are a Chrome/Dawn-VERSION constant,
+# essentially GPU-INDEPENDENT: even a 2012 Kepler GTX 660 reports the modern 16384/2048/48 values -
+# feature level 11_0 covers everything from ~2012 on, so there is no lower "old GPU" tier for any
+# realistic host (that hypothesis is refuted by the 660 capture).
+#   -> We emit this ONE real set for EVERY profile. That is NOT a tell: real Chrome reports it
+#      identically across the whole installed base, so we blend into the crowd. Randomising these
+#      numbers would be the tell (real values are fixed). Variation lives in the attributes that
+#      genuinely vary (canvas/screen/GPU-model/fonts/tz/hw), not here.
+#   -> Dolphin Anty instead reported 8192/256/16 - a clamp (or genuinely pre-2012 FL-10 hardware),
+#      NOT what real Chrome reports; paired with a spoofed strong webgl_renderer that is an
+#      incoherence tell we avoid.
+# All four native captures agree on maxBindingsPerBindGroup=1000 and maxStorageBufferBindingSize=
+# 2147483644 (Dolphin's 640 / 2147483647 was the older Dawn). AMD/Intel native worth a spot-check,
+# but it is Dawn-driven so almost certainly identical. Pin from the shipped 150 build before wiring.
 WEBGPU_LIMITS_DEFAULT = {
     "maxTextureDimension1D": 16384, "maxTextureDimension2D": 16384, "maxTextureDimension3D": 2048,
     "maxTextureArrayLayers": 2048, "maxBindGroups": 4, "maxBindGroupsPlusVertexBuffers": 24,

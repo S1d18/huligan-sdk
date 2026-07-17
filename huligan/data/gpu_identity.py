@@ -133,10 +133,10 @@ WEBGPU_LIMITS_DEFAULT = {
 # profiles - Dolphin passes these THROUGH (it spoofs only the renderer STRING, not the numbers),
 # so unlike WebGPU there is no Dolphin tell here. These fingerprint-critical params are an
 # ANGLE-D3D11 constant, vendor-scoped (NVIDIA confirmed; AMD/Intel to capture), NOT per-GPU.
-# GROUND TRUTH for the T2.3 rebuild: reconcile webgl_profiles.py's per-class NVIDIA tables to this
-# (its 34076=32768 in some classes is impossible on D3D11 - real MAX_CUBE_MAP=16384) and fix its
-# GL_ENUM_NAMES labels (34045/34047/36347/36348/36349 are mislabelled). Value edits change the
-# fingerprint -> operator BrowserScan/CreepJS validation at the rebuild. Names below are canonical.
+# APPLIED 2026-07 (SDK-side; the current binary already reads webgl_param_*): fixed webgl_profiles.py
+# 34076 (32768 -> 16384; 32768 = impossible MAX_CUBE_MAP on D3D11) and the mislabelled GL_ENUM_NAMES
+# 34045/34047/36347/36348/36349. The 34076 change affects the fingerprint -> confirm on BrowserScan/
+# CreepJS via the validation harness. Names below are canonical (this table is the authoritative ref).
 GL_PARAMS_NATIVE = {
     "nvidia": {
         3379: 16384,           # MAX_TEXTURE_SIZE

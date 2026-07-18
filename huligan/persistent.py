@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from .chrome import find_chrome
-from .geoip import GeoIPManager
+from .geoip import _resolve_geo
 from .launch_plan import (
     build_launch_plan,
     cdp_mode_from_conf,
@@ -61,8 +61,6 @@ from .launch_plan import (
 )
 from .proxy import (
     ProxyForwarder,
-    detect_exit_ip,
-    detect_local_public_ip,
     parse_proxy_string,
 )
 
@@ -341,56 +339,24 @@ def launch_persistent(
             proxy_info["type"] = proxy_type
         log.info(f"Proxy: {proxy_info['type']}://{proxy_info['host']}:{proxy_info['port']}")
 
-    # --- GeoIP (sync) ---------------------------------------------------
-    geo = None
-    public_ip_for_geo: Optional[str] = None
-    if geoip:
-        if proxy_info:
-            public_ip_for_geo = proxy_info["host"]
-        else:
-            try:
-                public_ip_for_geo = detect_local_public_ip(timeout=4.0)
-            except Exception as e:
-                log.warning(f"Local public IP probe failed: {e}")
-        if public_ip_for_geo and not timezone:
-            try:
-                mgr = GeoIPManager()
-                geo = mgr.lookup(public_ip_for_geo)
-                mgr.close()
-                if getattr(geo, "error", None):
-                    log.warning(f"GeoIP error: {geo.error}")
-                    geo = None
-                else:
-                    log.info(f"GeoIP: {geo}")
-            except Exception as e:
-                log.warning(f"GeoIP failed: {e}")
-                geo = None
-
-    # --- resolve timezone / language (mirror Browser.start) -------------
-    tz = timezone
-    lang = language
-    if geo and not tz:
-        tz = geo.timezone
-    if geo and not lang:
-        geo_lang = geo.language or "en-US"
-        parts = [p.strip() for p in geo_lang.split(",") if p.strip()]
-        if "en-US" not in parts:
-            parts.append("en-US")
-        if "en" not in parts:
-            parts.append("en")
-        lang = ",".join(parts)
-
-    # --- WebRTC spoof IP (sync). A .conf value always wins. -------------
+    # --- GeoIP + timezone/language + WebRTC (shared resolver) -----------
+    # The pure network + GeoIP resolution lives in geoip._resolve_geo so this
+    # launch path and huligan.geoip.resolve_launch_geo (the WebUI preview) can
+    # never drift. The ONE profile-specific rule stays here: a webrtc_local_ipv4
+    # already pinned in the .conf always wins over any probed exit IP (so we skip
+    # the exit-IP probe entirely when it is present).
     existing_webrtc = read_conf_value(profile_path, "webrtc_local_ipv4") or ""
-    webrtc_spoof_ip: Optional[str] = existing_webrtc or None
-    if not webrtc_spoof_ip and geoip:
-        if proxy_info:
-            webrtc_spoof_ip = detect_exit_ip(proxy_info, timeout=4.0)
-            if webrtc_spoof_ip:
-                log.info(f"WebRTC spoof IPv4: {webrtc_spoof_ip} (proxy exit)")
-        elif public_ip_for_geo:
-            webrtc_spoof_ip = public_ip_for_geo
-            log.info(f"WebRTC spoof IPv4: {webrtc_spoof_ip} (local public)")
+    resolved = _resolve_geo(
+        proxy_info,
+        timezone=timezone,
+        language=language,
+        geoip=geoip,
+        resolve_webrtc=not existing_webrtc,
+    )
+    geo = resolved.geo
+    tz = resolved.timezone
+    lang = resolved.languages
+    webrtc_spoof_ip: Optional[str] = existing_webrtc or resolved.webrtc_spoof_ipv4
 
     # --- resolve which .conf the binary will read -----------------------
     # The saved profile is the user's template. Under conf_geo="copy" (default)

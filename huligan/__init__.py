@@ -11,8 +11,8 @@ Usage:
 
 from .browser import Browser
 from .fingerprint import FingerprintGenerator, FingerprintProfile
-from .geoip import GeoIPManager, GeoIPResult
-from .proxy import ProxyForwarder, parse_proxy_string
+from .geoip import GeoIPManager, GeoIPResult, resolve_launch_geo
+from .proxy import ProxyForwarder, parse_proxy_string, test_proxy
 from .chrome import find_chrome
 from .installer import (
     ensure_chrome,
@@ -104,7 +104,7 @@ try:
 except ImportError:
     pass
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __all__ = [
     "Browser",
     "launch_persistent",
@@ -119,8 +119,10 @@ __all__ = [
     "FingerprintProfile",
     "GeoIPManager",
     "GeoIPResult",
+    "resolve_launch_geo",
     "ProxyForwarder",
     "parse_proxy_string",
+    "test_proxy",
     "find_chrome",
     "ensure_chrome",
     "ensure_binary",

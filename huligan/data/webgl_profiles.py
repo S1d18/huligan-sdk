@@ -398,11 +398,11 @@ WEBGL1_PARAMS_CONSTANT = {
 WEBGL1_PARAMS_BY_GPU = {
     "nvidia_high": {
         # RTX 3070+ / RTX 40xx / RTX 50xx
-        3379: 32768,                  # MAX_TEXTURE_SIZE
+        3379: 16384,                  # MAX_TEXTURE_SIZE
         3386: [32767, 32767],         # MAX_VIEWPORT_DIMS
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
-        34024: 32768,                 # MAX_RENDERBUFFER_SIZE
+        34024: 16384,                 # MAX_RENDERBUFFER_SIZE
         34076: 16384,                 # MAX_CUBE_MAP_TEXTURE_SIZE
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
@@ -558,11 +558,11 @@ WEBGL2_PARAMS_CONSTANT = {
 # Parameters that VARY by GPU (WebGL2)
 WEBGL2_PARAMS_BY_GPU = {
     "nvidia_high": {
-        3379: 32768,                  # MAX_TEXTURE_SIZE
+        3379: 16384,                  # MAX_TEXTURE_SIZE
         3386: [32767, 32767],         # MAX_VIEWPORT_DIMS
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
-        34024: 32768,                 # MAX_RENDERBUFFER_SIZE
+        34024: 16384,                 # MAX_RENDERBUFFER_SIZE
         34076: 16384,                 # MAX_CUBE_MAP_TEXTURE_SIZE
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS

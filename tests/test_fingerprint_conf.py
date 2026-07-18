@@ -80,7 +80,9 @@ def test_seed1_spot_values_and_new_additions():
     assert out["block_port_scan"] == "1"
     assert out["webgpu_enabled"] == "1"
     assert out["battery_discharging_time"] == "inf"
-    assert out["client_rects_noise_seed"].isdigit()
+    # DOMRect noise is a binary no-op (Phase 3.4 - it was a CreepJS lie). The SDK keeps the seed 0
+    # so removing the no-op can never silently re-enable it for existing profiles (T2.1 contract guard).
+    assert out["client_rects_noise_seed"] == "0"
     assert "client_rects_seed" not in out          # the wrong key name must be gone
     # New additions present with sane defaults.
     assert out["audio_sample_rate"] == "44100"

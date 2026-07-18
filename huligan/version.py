@@ -10,6 +10,17 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 3 (2026-07-18): WebUI-migration SDK helpers (Phase 2) — all public, all
+#   sync-friendly so a FastAPI backend can call them without an event loop:
+#   cookies.export_cookies_to_file_sync / import_cookies_from_file_sync and
+#   profile_bundle.export_profile_bundle_to_file_sync (worker-thread event loop via
+#   the existing persistent._BackgroundLoop; async originals unchanged),
+#   proxy.test_proxy (parse + exit-IP probe + GeoIP -> one dict, never raises), and
+#   geoip.resolve_launch_geo (preview the tz/lang/geolocation/webrtc a launch would
+#   apply). launch_persistent's geo/tz/lang/WebRTC resolution was factored into the
+#   shared geoip._resolve_geo so the preview and the real launch can never drift —
+#   no behavior change on the launch path. No new .conf key; CONF_SCHEMA_VERSION
+#   untouched. pyproject 1.3.0 -> 1.4.0.
 # Build 2 (2026-07-15): Chrome auto-update surface + portable profile bundles.
 #   Manifest-driven resolution (installer.resolve_version / channels: pinned/stable/
 #   latest, TTL-cached manifest, sha from manifest), .conf compatibility gate
@@ -43,7 +54,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 2
+BUILD_NUMBER = 3
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "150.0.7871.101"

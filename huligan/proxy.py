@@ -26,6 +26,7 @@ import base64
 import logging
 import socket
 import struct
+import time
 from typing import Optional
 
 log = logging.getLogger("huligan.proxy")
@@ -585,3 +586,82 @@ def parse_proxy_string(proxy_str: str) -> dict:
         "password": password,
         "type": proxy_type,
     }
+
+
+def test_proxy(proxy_str: str, *, timeout: float = 15.0) -> dict:
+    """Test a proxy end-to-end and geo-locate its exit IP.
+
+    Composes :func:`parse_proxy_string` + :func:`detect_exit_ip` +
+    :class:`huligan.geoip.GeoIPManager` into a single synchronous call the
+    WebUI/GUI "Test Proxy" button can hit. Reachability is proven by actually
+    tunnelling a probe through the proxy to discover the public IPv4 it presents
+    (the same probe launch uses for ``webrtc_local_ipv4``); ``latency_ms`` is
+    that round-trip.
+
+    Never raises for a dead/unreachable/unparseable proxy — failures are folded
+    into ``{"ok": False, "error": ...}``. ``ok`` is ``True`` as soon as the proxy
+    tunnels successfully, even if the subsequent GeoIP lookup fails (the geo
+    fields then stay ``None`` and ``error`` carries the GeoIP reason).
+
+    Args:
+        proxy_str: Proxy in any format ``parse_proxy_string`` accepts.
+        timeout: Per-socket timeout for the exit-IP probe (seconds).
+
+    Returns:
+        ``{ok, ip, country_code, city, timezone, language, latitude, longitude,
+        latency_ms, geoip_source, error}``.
+    """
+    result = {
+        "ok": False,
+        "ip": None,
+        "country_code": None,
+        "city": None,
+        "timezone": None,
+        "language": None,
+        "latitude": None,
+        "longitude": None,
+        "latency_ms": None,
+        "geoip_source": None,
+        "error": None,
+    }
+
+    try:
+        proxy_info = parse_proxy_string(proxy_str)
+    except Exception as e:
+        result["error"] = f"invalid proxy string: {e}"
+        return result
+
+    # Prove reachability by tunnelling a probe through the proxy to its exit IP.
+    start = time.perf_counter()
+    exit_ip = detect_exit_ip(proxy_info, timeout=timeout)
+    result["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    if not exit_ip:
+        result["error"] = "proxy unreachable (no exit IP)"
+        return result
+
+    result["ip"] = exit_ip
+    result["ok"] = True  # the proxy tunnels; geo lookup below is best-effort.
+
+    # GeoIP the exit IP. Imported lazily to avoid a proxy<->geoip import cycle.
+    try:
+        from .geoip import GeoIPManager
+
+        mgr = GeoIPManager()
+        try:
+            geo = mgr.lookup(exit_ip)
+        finally:
+            mgr.close()
+        if getattr(geo, "error", None):
+            result["error"] = f"geoip: {geo.error}"
+            return result
+        result["country_code"] = geo.country_code or None
+        result["city"] = geo.city or None
+        result["timezone"] = geo.timezone or None
+        result["language"] = geo.language or None
+        result["latitude"] = geo.latitude
+        result["longitude"] = geo.longitude
+        result["geoip_source"] = geo.source or None
+    except Exception as e:
+        result["error"] = f"geoip lookup failed: {e}"
+
+    return result

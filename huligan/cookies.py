@@ -206,3 +206,45 @@ async def import_cookies_from_file(
             pw, cdp_port, attempts=attempts, interval=interval
         )
         return await import_cookies_to_page(page, path, clear_existing=clear_existing)
+
+
+# --- synchronous facades ---------------------------------------------------
+#
+# The attach-by-port helpers above are async (Playwright over CDP), but a
+# synchronous caller (a FastAPI handler, a GUI thread) has no event loop of its
+# own. These facades host a private event loop on a worker thread — the same
+# ``_BackgroundLoop`` primitive huligan.persistent uses for the proxy forwarder —
+# run the coroutine to completion, and tear the loop/thread down cleanly before
+# returning. Imported lazily so cookies stays a low-level module.
+
+
+def export_cookies_to_file_sync(cdp_port: int, path, **kw) -> int:
+    """Blocking wrapper around :func:`export_cookies_to_file`.
+
+    Runs the async export on a private worker-thread event loop and returns the
+    number of cookies written. Accepts the same keyword args as the async form
+    (``domains``, ``attempts``, ``interval``).
+    """
+    from .persistent import _BackgroundLoop
+
+    bl = _BackgroundLoop()
+    try:
+        return bl.run_coro(export_cookies_to_file(cdp_port, path, **kw))
+    finally:
+        bl.shutdown()
+
+
+def import_cookies_from_file_sync(cdp_port: int, path, **kw) -> int:
+    """Blocking wrapper around :func:`import_cookies_from_file`.
+
+    Runs the async import on a private worker-thread event loop and returns the
+    number of cookies loaded. Accepts the same keyword args as the async form
+    (``clear_existing``, ``attempts``, ``interval``).
+    """
+    from .persistent import _BackgroundLoop
+
+    bl = _BackgroundLoop()
+    try:
+        return bl.run_coro(import_cookies_from_file(cdp_port, path, **kw))
+    finally:
+        bl.shutdown()

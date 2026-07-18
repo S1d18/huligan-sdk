@@ -187,3 +187,32 @@ async def import_profile_bundle_from_file(
             pw, cdp_port, attempts=attempts, interval=interval
         )
         return await import_profile_cookies_to_page(page, path, clear_existing=clear_existing)
+
+
+# --- synchronous facade ----------------------------------------------------
+
+
+def export_profile_bundle_to_file_sync(
+    cdp_port: int,
+    path,
+    *,
+    conf_path,
+    name: Optional[str] = None,
+) -> Path:
+    """Blocking wrapper around :func:`export_profile_bundle_to_file`.
+
+    Runs the async bundle export on a private worker-thread event loop (mirroring
+    the ``_BackgroundLoop`` pattern in huligan.persistent) and returns the path of
+    the written ``.hbundle``. ``conf_path`` is the fingerprint .conf embedded in
+    the bundle; ``name`` defaults to the conf's stem.
+    """
+    from .persistent import _BackgroundLoop
+
+    bl = _BackgroundLoop()
+    try:
+        bl.run_coro(
+            export_profile_bundle_to_file(cdp_port, path, conf_path=conf_path, name=name)
+        )
+    finally:
+        bl.shutdown()
+    return Path(path)

@@ -26,8 +26,11 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+from .proxy import parse_proxy_string, detect_exit_ip, detect_local_public_ip
 
 log = logging.getLogger("huligan.geoip")
 
@@ -401,3 +404,165 @@ class GeoIPManager:
         """Close database reader."""
         if self.reader:
             self.reader.close()
+
+
+# --- shared launch-geo resolution -----------------------------------------
+#
+# The pure network + GeoIP resolution below is the SINGLE SOURCE OF TRUTH shared
+# by two callers so they can never drift:
+#   * huligan.persistent.launch_persistent — what a launch actually applies;
+#   * resolve_launch_geo (this module) — the WebUI/GUI "what will apply" preview.
+# The one rule that stays out here (in launch_persistent) is profile-specific: a
+# ``webrtc_local_ipv4`` already written into the .conf always wins over a probe.
+
+
+def _resolve_tz_lang(geo, timezone, language):
+    """Resolve the effective timezone / Accept-Language pair.
+
+    Explicit ``timezone`` / ``language`` always win over GeoIP. When GeoIP
+    supplies the language, ``en-US`` and ``en`` are appended as fallbacks (the
+    same list Chrome ships for a real locale). Returns ``(tz, lang)`` where each
+    may be ``None`` if neither an override nor GeoIP provided a value.
+    """
+    tz = timezone
+    lang = language
+    if geo and not tz:
+        tz = geo.timezone
+    if geo and not lang:
+        geo_lang = geo.language or "en-US"
+        parts = [p.strip() for p in geo_lang.split(",") if p.strip()]
+        if "en-US" not in parts:
+            parts.append("en-US")
+        if "en" not in parts:
+            parts.append("en")
+        lang = ",".join(parts)
+    return tz, lang
+
+
+@dataclass
+class _GeoResolution:
+    """Result of :func:`_resolve_geo` (internal)."""
+
+    geo: Optional[GeoIPResult]
+    timezone: Optional[str]
+    languages: Optional[str]
+    webrtc_spoof_ipv4: Optional[str]
+    public_ip: Optional[str]
+
+
+def _resolve_geo(
+    proxy_info: Optional[dict],
+    *,
+    timezone: Optional[str] = None,
+    language: Optional[str] = None,
+    geoip: bool = True,
+    resolve_webrtc: bool = True,
+    probe_timeout: float = 4.0,
+) -> _GeoResolution:
+    """Resolve timezone / language / geolocation / WebRTC IP from a proxy (or the
+    local public IP when no proxy). Pure of any .conf state — the caller decides
+    how the result reaches the binary.
+
+    Mirrors exactly what ``Browser.start`` / ``launch_persistent`` do:
+      * the geo-source IP is the proxy host, else the machine's own public IP;
+      * GeoIP is skipped entirely when ``timezone`` is given explicitly (an
+        explicit timezone also suppresses GeoIP-derived language + geolocation,
+        matching launch precedence);
+      * the WebRTC spoof IP is the proxy's *exit* IP (or the local public IP with
+        no proxy). ``resolve_webrtc=False`` skips that probe (used when the .conf
+        already pins ``webrtc_local_ipv4``).
+
+    Fails open: any probe/lookup error leaves the corresponding field ``None``.
+    """
+    geo: Optional[GeoIPResult] = None
+    public_ip: Optional[str] = None
+    if geoip:
+        if proxy_info:
+            public_ip = proxy_info.get("host")
+        else:
+            try:
+                public_ip = detect_local_public_ip(timeout=probe_timeout)
+            except Exception as e:
+                log.warning(f"Local public IP probe failed: {e}")
+        if public_ip and not timezone:
+            try:
+                mgr = GeoIPManager()
+                geo = mgr.lookup(public_ip)
+                mgr.close()
+                if getattr(geo, "error", None):
+                    log.warning(f"GeoIP error: {geo.error}")
+                    geo = None
+                else:
+                    log.info(f"GeoIP: {geo}")
+            except Exception as e:
+                log.warning(f"GeoIP failed: {e}")
+                geo = None
+
+    tz, lang = _resolve_tz_lang(geo, timezone, language)
+
+    webrtc_spoof_ipv4: Optional[str] = None
+    if resolve_webrtc and geoip:
+        if proxy_info:
+            webrtc_spoof_ipv4 = detect_exit_ip(proxy_info, timeout=probe_timeout)
+            if webrtc_spoof_ipv4:
+                log.info(f"WebRTC spoof IPv4: {webrtc_spoof_ipv4} (proxy exit)")
+        elif public_ip:
+            webrtc_spoof_ipv4 = public_ip
+            log.info(f"WebRTC spoof IPv4: {webrtc_spoof_ipv4} (local public)")
+
+    return _GeoResolution(
+        geo=geo,
+        timezone=tz,
+        languages=lang,
+        webrtc_spoof_ipv4=webrtc_spoof_ipv4,
+        public_ip=public_ip,
+    )
+
+
+def resolve_launch_geo(
+    proxy_str: Optional[str] = None,
+    *,
+    timezone: Optional[str] = None,
+    language: Optional[str] = None,
+) -> dict:
+    """Preview the timezone / language / geolocation / WebRTC IP a launch applies.
+
+    Composes ``parse_proxy_string`` + GeoIP + exit-IP probing exactly as
+    :func:`huligan.launch_persistent` does, so a WebUI form can show "what will
+    actually apply" for a given proxy before Chrome is launched. Explicit
+    ``timezone`` / ``language`` override GeoIP with the same precedence as launch
+    (an explicit timezone also suppresses GeoIP-derived language + geolocation).
+
+    Args:
+        proxy_str: Proxy in any format ``parse_proxy_string`` accepts. ``None``
+            resolves against the machine's own public IP (direct connection).
+        timezone: Force timezone (else GeoIP).
+        language: Force Accept-Language (else GeoIP).
+
+    Returns:
+        ``{timezone, languages, geolocation, webrtc_spoof_ipv4, geoip_source}``
+        where ``geolocation`` is ``{latitude, longitude, accuracy}`` or ``None``,
+        and every value is ``None`` when neither an override nor GeoIP produced it.
+    """
+    proxy_info = parse_proxy_string(proxy_str) if proxy_str else None
+    res = _resolve_geo(
+        proxy_info,
+        timezone=timezone,
+        language=language,
+        geoip=True,
+        resolve_webrtc=True,
+    )
+    geolocation = None
+    if res.geo is not None:
+        geolocation = {
+            "latitude": res.geo.latitude,
+            "longitude": res.geo.longitude,
+            "accuracy": int(res.geo.accuracy),
+        }
+    return {
+        "timezone": res.timezone or None,
+        "languages": res.languages or None,
+        "geolocation": geolocation,
+        "webrtc_spoof_ipv4": res.webrtc_spoof_ipv4,
+        "geoip_source": (res.geo.source if res.geo else None),
+    }

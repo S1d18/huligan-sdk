@@ -393,7 +393,8 @@ WEBGL1_PARAMS_CONSTANT = {
     37443: 37444,                     # UNPACK_COLORSPACE_CONVERSION_WEBGL
 }
 
-# Parameters that VARY by GPU (WebGL1)
+# WebGL1 getParameter values. Like the WebGL2 table below, these are ANGLE-D3D11 constants - keep all
+# classes identical (see the note on WEBGL2_PARAMS_BY_GPU). Only the renderer string differs by GPU.
 # These are the only params that differ between GPU models on ANGLE/D3D11
 WEBGL1_PARAMS_BY_GPU = {
     "nvidia_high": {
@@ -431,7 +432,7 @@ WEBGL1_PARAMS_BY_GPU = {
     "intel_integrated": {
         # UHD 620/630/730/770, Iris Xe
         3379: 16384,                  # MAX_TEXTURE_SIZE
-        3386: [16384, 16384],         # MAX_VIEWPORT_DIMS (Intel reports lower)
+        3386: [32767, 32767],         # MAX_VIEWPORT_DIMS (ANGLE-D3D11 const, all vendors)
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
         34024: 16384,                 # MAX_RENDERBUFFER_SIZE
@@ -463,7 +464,7 @@ WEBGL1_PARAMS_BY_GPU = {
     "amd_integrated": {
         # Vega 7/8/11, Radeon 660M/680M/780M
         3379: 16384,                  # MAX_TEXTURE_SIZE
-        3386: [16384, 16384],         # MAX_VIEWPORT_DIMS (integrated)
+        3386: [32767, 32767],         # MAX_VIEWPORT_DIMS (ANGLE-D3D11 const, all vendors)
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
         34024: 16384,                 # MAX_RENDERBUFFER_SIZE
@@ -555,7 +556,9 @@ WEBGL2_PARAMS_CONSTANT = {
     37447: 0,                         # COPY_WRITE_BUFFER_BINDING
 }
 
-# Parameters that VARY by GPU (WebGL2)
+# WebGL2 getParameter values. These are ANGLE-D3D11 CONSTANTS: byte-identical across NVIDIA/Intel/AMD
+# and integrated/discrete (confirmed via real captures, 2026-07). Keep every class IDENTICAL - only the
+# renderer string differs. Do NOT re-introduce per-class variation (it is a coherence tell, not realism).
 WEBGL2_PARAMS_BY_GPU = {
     "nvidia_high": {
         3379: 16384,                  # MAX_TEXTURE_SIZE
@@ -599,7 +602,7 @@ WEBGL2_PARAMS_BY_GPU = {
     },
     "intel_integrated": {
         3379: 16384,                  # MAX_TEXTURE_SIZE
-        3386: [16384, 16384],         # MAX_VIEWPORT_DIMS
+        3386: [32767, 32767],         # MAX_VIEWPORT_DIMS
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
         34024: 16384,                 # MAX_RENDERBUFFER_SIZE
@@ -639,7 +642,7 @@ WEBGL2_PARAMS_BY_GPU = {
     },
     "amd_integrated": {
         3379: 16384,                  # MAX_TEXTURE_SIZE
-        3386: [16384, 16384],         # MAX_VIEWPORT_DIMS
+        3386: [32767, 32767],         # MAX_VIEWPORT_DIMS
         33901: [1, 1024],             # ALIASED_POINT_SIZE_RANGE
         33902: [1, 1],                # ALIASED_LINE_WIDTH_RANGE
         34024: 16384,                 # MAX_RENDERBUFFER_SIZE

@@ -606,7 +606,7 @@ WEBGL2_PARAMS_BY_GPU = {
         34076: 16384,                 # MAX_CUBE_MAP_TEXTURE_SIZE
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
-        35657: 2048,                  # MAX_3D_TEXTURE_SIZE (Intel lower)
+        35657: 4096,                  # MAX_3D_TEXTURE_SIZE
         35658: 16380,                 # MAX_ELEMENTS_VERTICES
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
@@ -646,7 +646,7 @@ WEBGL2_PARAMS_BY_GPU = {
         34076: 16384,                 # MAX_CUBE_MAP_TEXTURE_SIZE
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
-        35657: 2048,                  # MAX_3D_TEXTURE_SIZE
+        35657: 4096,                  # MAX_3D_TEXTURE_SIZE
         35658: 16380,                 # MAX_ELEMENTS_VERTICES
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS

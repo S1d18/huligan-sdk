@@ -27,10 +27,14 @@ from typing import Optional, Tuple, Union
 
 
 # Always-on, runtime-independent stealth features (build_launch_plan annotates
-# WHY these two TLS features are pinned OFF, at the use site below). Shared with
+# WHY these TLS features are pinned OFF, at the use site below). Shared with
 # get_default_stealth_args() so the command-line pins and the public integration
 # primitive have exactly ONE definition and can never drift on a Chrome upgrade.
-_STEALTH_DISABLE_FEATURES = ("TLSTrustAnchorIDs", "TlsMldsaSignatures")
+_STEALTH_DISABLE_FEATURES = (
+    "TLSTrustAnchorIDs",
+    "TlsMldsaSignatures",
+    "AddTLSServerHandshakePadding",
+)
 
 
 def build_launch_plan(
@@ -117,13 +121,19 @@ def build_launch_plan(
     # Features to disable, emitted as a SINGLE --disable-features switch.
     # Chrome keeps only the last --disable-features on the command line, so we
     # must collect everything here and join once — never append the switch twice.
-    # These two TLS features are gradual-rollout / Finch-flippable and live in
+    # These TLS features are gradual-rollout / Finch-flippable and live in
     # _STEALTH_DISABLE_FEATURES (module top): kTLSTrustAnchorIDs adds ClientHello
     # ext 0xCA34 (JA4 t13d1517h2 -> t13d1518h2, a non-Chrome TLS fingerprint WAFs
     # like SafeLine flag); kTlsMldsaSignatures adds ML-DSA codepoints to
-    # signature_algorithms. Pinned OFF so JA4 always matches stock Chrome
-    # (t13d1517h2_8daaf6152771_b6f405a00624, measured against 149 patched / 150
-    # stock). The Finch seed toggling them is what made detection intermittent.
+    # signature_algorithms; kAddTLSServerHandshakePadding adds ext 4832/0x12E0
+    # (TLSEXT_TYPE_server_padding, also JA4 ...1517h2 -> ...1518h2), caught on the
+    # 151 upgrade — the feature is FEATURE_DISABLED_BY_DEFAULT in net/base/
+    # features.cc, so a Finch seed was switching it on for us. Pinned OFF so JA4
+    # always matches stock Chrome (t13d1517h2_8daaf6152771_b6f405a00624, measured
+    # against 149 patched / 150 stock, and re-confirmed byte-identical on the 151
+    # build). The Finch seed toggling them is what made detection intermittent.
+    # WATCH: if Google ever ramps one of these to 100% of stable, NOT sending it
+    # becomes the anomaly — re-measure stock Chrome each major before trusting.
     disable_features = list(_STEALTH_DISABLE_FEATURES)
 
     # Language from GeoIP
@@ -171,7 +181,7 @@ def get_default_stealth_args() -> list:
     Returns exactly the runtime-INDEPENDENT subset::
 
         --no-sandbox
-        --disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures
+        --disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures,AddTLSServerHandshakePadding
 
     Deliberately EXCLUDED (they need runtime values you supply yourself):
       * proxy / host-resolver / WebRTC leak flags (need the proxy + spoof IP)

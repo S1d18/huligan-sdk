@@ -10,6 +10,17 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-08-06): Chrome 151.0.7922.76 major bump (150 -> 151). BUILD_NUMBER
+#   resets to 1 on the major. One real change beyond the version bump:
+#   launch_plan._STEALTH_DISABLE_FEATURES gained AddTLSServerHandshakePadding.
+#   On 151 a Finch seed was enabling features::kAddTLSServerHandshakePadding
+#   (FEATURE_DISABLED_BY_DEFAULT in net/base/features.cc), which puts ClientHello
+#   extension 4832 (0x12E0, TLSEXT_TYPE_server_padding) on the wire and moved JA4
+#   t13d1517h2 -> t13d1518h2. Third Finch-flipped TLS feature in three majors.
+#   Pinned off, JA4 is byte-identical to the 150 build again
+#   (t13d1517h2_8daaf6152771_b6f405a00624). No new .conf key; CONF_SCHEMA_VERSION
+#   untouched, so manifest min_conf_schema stays 1. No other API changes vs
+#   Build 3. pyproject 1.4.0 -> 1.5.0.
 # Build 3 (2026-07-18): WebUI-migration SDK helpers (Phase 2) — all public, all
 #   sync-friendly so a FastAPI backend can call them without an event loop:
 #   cookies.export_cookies_to_file_sync / import_cookies_from_file_sync and
@@ -54,10 +65,10 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 3
+BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "150.0.7871.101"
+CHROME_VERSION = "151.0.7922.76"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

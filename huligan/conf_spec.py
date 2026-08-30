@@ -150,8 +150,17 @@ def render_conf(v: dict, *, header: Optional[str] = None) -> str:
         ("screen_height", _i(g("screen_height"))),
         ("screen_avail_width", _i(g("screen_avail_width"))),
         ("screen_avail_height", _i(g("screen_avail_height"))),
-        ("outer_width", _i(g("outer_width"))),
-        ("outer_height", _i(g("outer_height"))),
+        # outer_width / outer_height are deliberately NOT emitted.
+        #
+        # Pinning them to the spoofed screen size produces a window that cannot
+        # contain its own viewport: measured on the 152 build with the window at
+        # 1200x800, a profile carrying outer_width=2560 reported outerWidth=2560
+        # against the real innerWidth=1184 — a 1376px gap where a real window has
+        # ~16px of border. Stock Chrome reported 1200/1184.
+        #
+        # 06_network falls back to the REAL window when the key is absent, which
+        # is the coherent answer: a windowed browser narrower than its screen is
+        # ordinary, one wider than itself is not.
         ("color_depth", _i(g("color_depth"))),
         ("device_pixel_ratio", _f(g("device_pixel_ratio"))),
     ])

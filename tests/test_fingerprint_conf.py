@@ -23,6 +23,11 @@ def _kv(text):
 
 
 # The exact 86 keys the pre-consolidation serializer emitted for seed=1.
+# Was 86 keys; outer_height/outer_width were REMOVED on 2026-08-30 (see
+# conf_spec.py). Pinning them to the spoofed screen made the browser report a
+# window that could not contain its own viewport — outerWidth 2560 against
+# innerWidth 1184, where a real window has ~16px of border. 06_network falls back
+# to the real window when the keys are absent, which is the coherent answer.
 GOLDEN_86 = {
     "audio_noise_seed", "battery_charging", "battery_charging_time",
     "battery_discharging_time", "battery_level", "block_port_scan",
@@ -39,7 +44,7 @@ GOLDEN_86 = {
     "media_device_0_label", "media_device_1_device_id", "media_device_1_group_id",
     "media_device_1_kind", "media_device_1_label", "media_device_2_device_id",
     "media_device_2_group_id", "media_device_2_kind", "media_device_2_label",
-    "media_devices_count", "outer_height", "outer_width", "pixel_depth",
+    "media_devices_count", "pixel_depth",
     "platform", "screen_avail_height", "screen_avail_left", "screen_avail_top",
     "screen_avail_width", "screen_height", "screen_width", "timezone",
     "webgl2_extensions", "webgl_extensions",

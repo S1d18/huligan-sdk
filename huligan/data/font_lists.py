@@ -288,7 +288,11 @@ def get_random_fonts(platform="Win32", count=None, rng=None):
     else:  # Linux
         # Linux: use all available fonts
         if count is None:
-            count = rng.randint(45, len(LINUX_FONTS))
+            # LINUX_FONTS holds 43 entries, so the original randint(45, len(...))
+            # was randint(45, 43) and raised ValueError on EVERY call — meaning
+            # generate(platform="Linux x86_64") could never succeed. Clamp the
+            # lower bound to the list we actually have.
+            count = rng.randint(min(45, len(LINUX_FONTS)), len(LINUX_FONTS))
 
         # Always include some core Linux fonts
         core_linux = ["DejaVu Sans", "DejaVu Serif", "DejaVu Sans Mono",

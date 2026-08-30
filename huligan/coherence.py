@@ -124,6 +124,8 @@ def _ctx_from_profile(p, binary_os: str) -> dict:
         "device_pixel_ratio": g("device_pixel_ratio"),
         "languages": g("languages"),
         "timezone": g("timezone"),
+        "connection_rtt": g("connection_rtt"),
+        "connection_downlink": g("connection_downlink"),
         "fonts": list(g("fonts") or []),
         "binary_os": binary_os,
     }
@@ -177,6 +179,8 @@ def _ctx_from_conf(text: str, binary_os: str) -> dict:
         "device_pixel_ratio": _f("device_pixel_ratio"),
         "languages": d.get("languages"),
         "timezone": d.get("timezone"),
+        "connection_rtt": _f("connection_rtt"),
+        "connection_downlink": _f("connection_downlink"),
         "fonts": fonts,
         "binary_os": binary_os,
     }
@@ -299,7 +303,41 @@ def _c17(ctx):
                          ("fonts", "platform"), "Segoe UI", "platform-matched fonts")
 
 
-_PREDICATES = [_c1, _c2, _c3, _c4, _c5, _c6, _c8, _c10, _c11, _c14, _c15, _c17]
+def _c21(ctx):
+    """navigator.connection.rtt must be a value stock Chrome could round to.
+
+    NetworkStateNotifier::RoundRtt uses kGranularity = 50ms and kMaxRtt = 3s,
+    so anything not a multiple of 50, or above 3000, is unreachable in stock.
+    """
+    rtt = ctx.get("connection_rtt")
+    if rtt is None:
+        return None
+    if rtt < 0 or rtt > 3000 or int(rtt) % 50 != 0:
+        return Violation("C21_connection_rtt_granularity", Severity.ERROR,
+                         "connection_rtt=%s is not reachable in stock Chrome "
+                         "(must be a multiple of 50ms, 0..3000)" % rtt,
+                         ("connection_rtt",), rtt, "multiple of 50, <=3000")
+    return None
+
+
+def _c22(ctx):
+    """navigator.connection.downlink must sit on Chrome's 50 kbps bucket grid.
+
+    NetworkStateNotifier::RoundMbps buckets at 50 kbps and hard-caps at
+    10.0 Mbps, so >10 is impossible and off-grid values are a single-signal tell.
+    """
+    dl = ctx.get("connection_downlink")
+    if dl is None:
+        return None
+    if dl < 0 or dl > 10.0 or round(dl * 1000) % 50 != 0:
+        return Violation("C22_connection_downlink_bucket", Severity.ERROR,
+                         "connection_downlink=%s is not reachable in stock "
+                         "Chrome (multiple of 0.05 Mbps, hard cap 10.0)" % dl,
+                         ("connection_downlink",), dl, "multiple of 0.05, <=10.0")
+    return None
+
+
+_PREDICATES = [_c1, _c2, _c3, _c4, _c5, _c6, _c8, _c10, _c11, _c14, _c15, _c17, _c21, _c22]
 
 
 def _run(ctx) -> CoherenceReport:

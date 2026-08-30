@@ -22,9 +22,21 @@ def test_ensure_binary_delegates_to_ensure_chrome():
 
 
 def test_get_default_stealth_args_exact():
+    """Deliberate canary on the public flag surface.
+
+    The literal is spelled out (rather than derived from
+    _STEALTH_DISABLE_FEATURES) so that adding or dropping a Finch pin forces a
+    conscious update here instead of silently changing what we ship. Its sibling
+    test_stealth_args_do_not_drift_from_launch_plan covers the derived side.
+
+    Each entry is a Finch flag observed to move our JA4 away from stock Chrome:
+    TLSTrustAnchorIDs + TlsMldsaSignatures (ext 0xCA34, JA4 1516->1517) and
+    AddTLSServerHandshakePadding (ext 4832/0x12E0, pinned 2026-08-06 during the
+    151 cycle -- which is when this assertion went stale).
+    """
     assert get_default_stealth_args() == [
         "--no-sandbox",
-        "--disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures",
+        "--disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures,AddTLSServerHandshakePadding",
     ]
 
 

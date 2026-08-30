@@ -484,9 +484,101 @@ class FingerprintGenerator:
         platform: str = "Win32",
         gpu_vendor_preference: Optional[str] = None,
         canvas_noise: bool = False,
+        coherent: bool = True,
+        allow_rare: bool = False,
+        max_attempts: int = 16,
     ) -> FingerprintProfile:
         """
-        Generate unique fingerprint profile.
+        Generate a unique, internally-consistent fingerprint profile.
+
+        The generator draws hardware attributes independently, so a raw draw can
+        produce combinations that do not occur on real devices (a 2-core / 2 GB
+        box reporting an RTX 4090). This wrapper re-rolls until the draw passes
+        the cross-attribute rules in ``huligan.coherence`` (C1-C17).
+
+        Args:
+            platform: "Win32", "MacIntel", or "Linux x86_64".
+            gpu_vendor_preference: "nvidia", "amd", "intel", or None.
+            canvas_noise: opt-in per-profile canvas. Default False =
+                stable native canvas (Dolphin-parity, zero tampering
+                signal). True = unique-but-clean canvas via the v2
+                sparse algorithm (use when canvas unlinkability matters).
+            coherent: when False, return the raw draw unchecked (old behaviour).
+            allow_rare: accept WARN-level ("rare but real") combinations. Default
+                False - rarity is itself a scored signal now, so we prefer common
+                hardware. ERROR-level violations are never accepted either way.
+            max_attempts: how many draws before giving up.
+
+        Returns:
+            FingerprintProfile
+
+        Raises:
+            CoherenceError: if no draw within ``max_attempts`` was free of
+                ERROR-level violations. That means the generator's own pools are
+                inconsistent - a bug worth surfacing, not something to paper over.
+
+        Note:
+            Re-rolling consumes RNG draws, so a given ``seed`` still maps to a
+            stable profile within a release, but not necessarily to the same
+            profile a pre-#39 release produced for that seed.
+        """
+        if not coherent:
+            return self._generate_once(platform, gpu_vendor_preference, canvas_noise)
+
+        # Local import: coherence is pure-stdlib and importing it at module level
+        # would create a cycle (coherence reads profile attributes).
+        from .coherence import Severity, CoherenceError, validate_profile
+
+        binary_os = {
+            "Win32": "windows",
+            "MacIntel": "macos",
+        }.get(platform, "linux")
+
+        best = None
+        best_report = None
+
+        for _ in range(max_attempts):
+            candidate = self._generate_once(platform, gpu_vendor_preference, canvas_noise)
+            report = validate_profile(candidate, binary_os=binary_os)
+
+            blocking = [
+                v for v in report.violations
+                if v.severity >= (Severity.ERROR if allow_rare else Severity.WARN)
+            ]
+            if not blocking:
+                return candidate
+
+            # Keep the least-bad draw so the error message can show real detail.
+            if best is None or len(blocking) < len(best_report):
+                best, best_report = candidate, blocking
+
+        if best_report and any(v.severity >= Severity.ERROR for v in best_report):
+            raise CoherenceError(validate_profile(best, binary_os=binary_os))
+
+        # Only WARN-level left: a rare-but-real device. Returning it beats failing
+        # a launch, but say so rather than hiding it.
+        import warnings
+        warnings.warn(
+            "FingerprintGenerator: no common-hardware draw after %d attempts; "
+            "returning a rare-but-valid combination (%s). Widen the generator "
+            "pools or pass allow_rare=True to silence this."
+            % (max_attempts, ", ".join(v.code for v in best_report or ())),
+            stacklevel=2,
+        )
+        return best
+
+    def _generate_once(
+        self,
+        platform: str = "Win32",
+        gpu_vendor_preference: Optional[str] = None,
+        canvas_noise: bool = False,
+    ) -> FingerprintProfile:
+        """
+        Draw one candidate profile, without any coherence check.
+
+        Hardware attributes are drawn independently here; `generate()` is what
+        turns that into a plausible device by re-rolling incoherent draws.
+        Call this directly only when you deliberately want an unchecked profile.
 
         Args:
             platform: "Win32", "MacIntel", or "Linux x86_64"

@@ -30,9 +30,11 @@ from typing import Optional, Tuple, Union
 # WHY these TLS features are pinned OFF, at the use site below). Shared with
 # get_default_stealth_args() so the command-line pins and the public integration
 # primitive have exactly ONE definition and can never drift on a Chrome upgrade.
+# Chrome 152: pin ONLY the padding feature. See the block comment at the use
+# site — TLSTrustAnchorIDs flipped to FEATURE_ENABLED_BY_DEFAULT in 152, so
+# suppressing it now makes us the anomaly instead of hiding one.
+# RE-MEASURE THIS AGAINST STOCK ON EVERY MAJOR. It has changed twice already.
 _STEALTH_DISABLE_FEATURES = (
-    "TLSTrustAnchorIDs",
-    "TlsMldsaSignatures",
     "AddTLSServerHandshakePadding",
 )
 
@@ -121,19 +123,37 @@ def build_launch_plan(
     # Features to disable, emitted as a SINGLE --disable-features switch.
     # Chrome keeps only the last --disable-features on the command line, so we
     # must collect everything here and join once — never append the switch twice.
-    # These TLS features are gradual-rollout / Finch-flippable and live in
-    # _STEALTH_DISABLE_FEATURES (module top): kTLSTrustAnchorIDs adds ClientHello
-    # ext 0xCA34 (JA4 t13d1517h2 -> t13d1518h2, a non-Chrome TLS fingerprint WAFs
-    # like SafeLine flag); kTlsMldsaSignatures adds ML-DSA codepoints to
-    # signature_algorithms; kAddTLSServerHandshakePadding adds ext 4832/0x12E0
-    # (TLSEXT_TYPE_server_padding, also JA4 ...1517h2 -> ...1518h2), caught on the
-    # 151 upgrade — the feature is FEATURE_DISABLED_BY_DEFAULT in net/base/
-    # features.cc, so a Finch seed was switching it on for us. Pinned OFF so JA4
-    # always matches stock Chrome (t13d1517h2_8daaf6152771_b6f405a00624, measured
-    # against 149 patched / 150 stock, and re-confirmed byte-identical on the 151
-    # build). The Finch seed toggling them is what made detection intermittent.
-    # WATCH: if Google ever ramps one of these to 100% of stable, NOT sending it
-    # becomes the anomaly — re-measure stock Chrome each major before trusting.
+    # TLS pins live in _STEALTH_DISABLE_FEATURES (module top). The set is
+    # version-specific and MUST be re-measured against stock Chrome every major.
+    #
+    # net/base/features.cc defaults:
+    #                                   151            152
+    #   kTLSTrustAnchorIDs              DISABLED  ->   ENABLED    <- flipped
+    #   kTlsMldsaSignatures             ENABLED        ENABLED
+    #   kAddTLSServerHandshakePadding   DISABLED       DISABLED
+    #
+    # On 151, TrustAnchorIDs was off by default and a Finch seed switched it on
+    # for some installs, adding ClientHello ext 0xCA34 and moving JA4
+    # t13d1517h2 -> t13d1518h2 — intermittent, and WAFs like SafeLine flagged it.
+    # Pinning it off matched stock. In 152 Google turned it on by default, so the
+    # same pin now REMOVES an extension real Chrome sends. Measured on the 152
+    # build against stock via tls.peet.ws (GREASE ignored — randomised per
+    # connection):
+    #   stock 152              t13d1518h2_8daaf6152771_e2d80978ab2e  20 ext
+    #   old 3-feature pin set  t13d1517h2_...b6f405a00624            19 ext
+    #                          -> missing ext 51764 (0xCA34)
+    #   no pins at all         t13d1519h2_...3d1b1b7bef36            21 ext
+    #                          -> extra ext 4832 (0x12E0, server padding)
+    #   padding-only pin       matches stock exactly
+    #
+    # kAddTLSServerHandshakePadding stays pinned: it is DISABLED_BY_DEFAULT yet
+    # our build still emits ext 4832 without the pin, so something in our field
+    # -trial state enables it.
+    #
+    # This is the second time this set has had to change. Treat "pin a feature
+    # OFF" as inherently fragile: it silently becomes a tell the moment upstream
+    # turns that feature ON. tests/test_ja3_ja4_stability.py refuses to pass
+    # without a pinned per-major baseline for exactly this reason.
     disable_features = list(_STEALTH_DISABLE_FEATURES)
 
     # Language from GeoIP

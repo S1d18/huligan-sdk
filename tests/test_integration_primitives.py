@@ -29,14 +29,20 @@ def test_get_default_stealth_args_exact():
     conscious update here instead of silently changing what we ship. Its sibling
     test_stealth_args_do_not_drift_from_launch_plan covers the derived side.
 
-    Each entry is a Finch flag observed to move our JA4 away from stock Chrome:
-    TLSTrustAnchorIDs + TlsMldsaSignatures (ext 0xCA34, JA4 1516->1517) and
-    AddTLSServerHandshakePadding (ext 4832/0x12E0, pinned 2026-08-06 during the
-    151 cycle -- which is when this assertion went stale).
+    The set is VERSION-SPECIFIC and has already changed twice:
+
+      151: TLSTrustAnchorIDs + TlsMldsaSignatures + AddTLSServerHandshakePadding
+      152: AddTLSServerHandshakePadding only
+
+    kTLSTrustAnchorIDs flipped to FEATURE_ENABLED_BY_DEFAULT in 152
+    (net/base/features.cc), so pinning it off stopped hiding an anomaly and
+    started creating one -- our JA4 came out t13d1517h2 / 19 extensions against
+    stock's t13d1518h2 / 20, missing ext 51764 (0xCA34). Measured against stock
+    Chrome 152 via tls.peet.ws on the 152 build.
     """
     assert get_default_stealth_args() == [
         "--no-sandbox",
-        "--disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures,AddTLSServerHandshakePadding",
+        "--disable-features=AddTLSServerHandshakePadding",
     ]
 
 

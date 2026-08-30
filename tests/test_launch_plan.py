@@ -95,9 +95,13 @@ def test_language_flags():
     feats = df[0].split("=", 1)[1].split(",")
     assert "ReduceAcceptLanguage" in feats
     assert "ReduceAcceptLanguageHTTP" in feats
-    # the TLS pins must survive alongside the language features
-    assert "TLSTrustAnchorIDs" in feats
-    assert "TlsMldsaSignatures" in feats
+    # The TLS pins must survive alongside the language features. Assert against
+    # the constant, not literals: the set is version-specific (it changed on the
+    # 152 upgrade) and the exact spelling is pinned by
+    # test_integration_primitives.test_get_default_stealth_args_exact.
+    from huligan.launch_plan import _STEALTH_DISABLE_FEATURES
+    for pin in _STEALTH_DISABLE_FEATURES:
+        assert pin in feats, pin
 
 
 def test_no_language_no_lang_flags():
@@ -108,7 +112,9 @@ def test_no_language_no_lang_flags():
     df = [a for a in args if a.startswith("--disable-features=")]
     assert len(df) == 1
     feats = df[0].split("=", 1)[1].split(",")
-    assert "TLSTrustAnchorIDs" in feats and "TlsMldsaSignatures" in feats
+    from huligan.launch_plan import _STEALTH_DISABLE_FEATURES
+    for pin in _STEALTH_DISABLE_FEATURES:
+        assert pin in feats, pin
     assert "ReduceAcceptLanguage" not in feats
 
 

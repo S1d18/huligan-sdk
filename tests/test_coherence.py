@@ -29,7 +29,28 @@ def test_coherent_conf_is_ok():
 
 
 def test_device_memory_cap_c5():
-    r = validate_conf(_conf(device_memory=16))
+    """navigator.deviceMemory on DESKTOP is a power of two clamped to [2,32].
+
+    This test used to assert that 16 was impossible, encoding the old
+    {0.25..8} spec text. Measured against stock Chrome 152 on a 64-core box:
+    deviceMemory reported 32. approximated_device_memory.cc (identical in 151
+    and 152) clamps desktop to kMinMemory=2.0 / kMaxMemory=32.0 and keeps the
+    8 GB ceiling only under BUILDFLAG(IS_ANDROID).
+    """
+    # legal on desktop, and 16 GB is one of the most common configurations
+    assert validate_conf(_conf(device_memory=16)).ok
+    assert validate_conf(_conf(device_memory=32)).ok
+
+    # above the desktop clamp
+    r = validate_conf(_conf(device_memory=64))
+    assert not r.ok and "C5_device_memory_cap" in _codes(r)
+
+    # below it (the old sub-2 values are Android-only)
+    r = validate_conf(_conf(device_memory=1))
+    assert not r.ok and "C5_device_memory_cap" in _codes(r)
+
+    # not a power of two
+    r = validate_conf(_conf(device_memory=12))
     assert not r.ok and "C5_device_memory_cap" in _codes(r)
 
 

@@ -596,8 +596,19 @@ class FingerprintGenerator:
         # Default hardware spec — overridden below for MacIntel so the
         # chip / cores / RAM stay internally consistent (fixes the
         # cluster effect documented in CloakBrowser #236).
-        cpu_cores = self.rng.choice([2, 4, 4, 6, 6, 8, 8])
-        device_memory = self.rng.choice([2, 4, 8, 8, 8])
+        # Cores and RAM are drawn as a PAIR, not independently: real desktops
+        # cluster tightly, and an 8-core box with 4 GB (or a 2-core with 32) is
+        # the sort of individually-valid-but-jointly-rare combination that
+        # rarity scoring now looks for. Values are what stock desktop Chrome can
+        # actually report — deviceMemory is a power of two clamped to [2,32]
+        # (approximated_device_memory.cc), NOT capped at 8; that cap is
+        # Android-only.
+        cpu_cores, device_memory = self.rng.choice([
+            (2, 4), (2, 8),                    # low-end / office
+            (4, 8), (4, 8), (4, 16),           # mainstream
+            (6, 16), (6, 16),                  # mainstream+
+            (8, 16), (8, 16), (8, 32),         # enthusiast
+        ])
 
         max_touch_points = 0 if platform == "Win32" else self.rng.choice([0, 5, 10])
 
@@ -607,10 +618,10 @@ class FingerprintGenerator:
             renderer = f"ANGLE (Apple, ANGLE Metal Renderer: Apple {chip}, Unspecified Version)"
             device_id = chip
             cpu_cores = mac_cores
-            # navigator.deviceMemory caps at 8 per spec — keep the
-            # spec-visible value here; real RAM is preserved in the
-            # tuple if a future channel ever needs it.
-            device_memory = min(mac_real_ram, 8)
+            # Desktop clamp is [2,32], not 8 — the 8 ceiling is Android-only
+            # (approximated_device_memory.cc). Round down to the power of two
+            # Chrome would report.
+            device_memory = min(mac_real_ram, 32)
         else:
             vendor, renderer, device_id = get_random_gpu(
                 gpu_vendor_preference, self.rng, platform=platform

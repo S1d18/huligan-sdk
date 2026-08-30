@@ -63,7 +63,15 @@ class CoherenceError(ValueError):
         super().__init__(f"incoherent fingerprint: {msg}")
 
 
-_VALID_DEVICE_MEMORY = {0.25, 0.5, 1, 2, 4, 8}
+# navigator.deviceMemory is clamped in
+# third_party/blink/common/device_memory/approximated_device_memory.cc:
+#   desktop  kMinMemory=2.0   kMaxMemory=32.0
+#   Android  kMinMemory=1.0   kMaxMemory=8.0
+# and rounded to a power of two before clamping. The old {0.25..8} set was the
+# pre-crbug.com/454354290 spec text; on desktop 16 and 32 are not just legal,
+# they are common. Verified against stock Chrome 152 (reported 32) and confirmed
+# identical in the 151 source, so this was our stale assumption, not a 152 change.
+_VALID_DEVICE_MEMORY = {2, 4, 8, 16, 32}
 
 
 # --- family classifiers ---------------------------------------------------
@@ -228,8 +236,9 @@ def _c5(ctx):
     m = ctx["device_memory"]
     if m is not None and m not in _VALID_DEVICE_MEMORY:
         return Violation("C5_device_memory_cap", Severity.ERROR,
-                         f"device_memory={m} is impossible; navigator.deviceMemory reports only "
-                         "{0.25,0.5,1,2,4,8}", ("device_memory",), m, sorted(_VALID_DEVICE_MEMORY))
+                         f"device_memory={m} is not reachable on desktop; navigator.deviceMemory "
+                         "reports a power of two clamped to [2,32]", ("device_memory",), m,
+                         sorted(_VALID_DEVICE_MEMORY))
 
 
 def _c6(ctx):

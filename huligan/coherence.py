@@ -132,6 +132,7 @@ def _ctx_from_profile(p, binary_os: str) -> dict:
         "device_pixel_ratio": g("device_pixel_ratio"),
         "languages": g("languages"),
         "timezone": g("timezone"),
+        "cpu_performance_tier": g("cpu_performance_tier"),
         "connection_rtt": g("connection_rtt"),
         "connection_downlink": g("connection_downlink"),
         "fonts": list(g("fonts") or []),
@@ -187,6 +188,7 @@ def _ctx_from_conf(text: str, binary_os: str) -> dict:
         "device_pixel_ratio": _f("device_pixel_ratio"),
         "languages": d.get("languages"),
         "timezone": d.get("timezone"),
+        "cpu_performance_tier": _i("cpu_performance_tier"),
         "connection_rtt": _f("connection_rtt"),
         "connection_downlink": _f("connection_downlink"),
         "fonts": fonts,
@@ -346,7 +348,30 @@ def _c22(ctx):
     return None
 
 
-_PREDICATES = [_c1, _c2, _c3, _c4, _c5, _c6, _c8, _c10, _c11, _c14, _c15, _c17, _c21, _c22]
+def _c23(ctx):
+    """navigator.cpuPerformance must agree with hardwareConcurrency.
+
+    Chromium's fallback derives the tier purely from the core count
+    (cpu_performance.cc GetTierFromCores): 1-2 low, 3-4 mid, 5-12 high, 13+ ultra.
+    A tier that disagrees with our own spoofed cpu_cores is a self-inflicted
+    cross-attribute contradiction, so it is an ERROR rather than a WARN.
+    """
+    tier, cores = ctx.get("cpu_performance_tier"), ctx.get("cpu_cores")
+    if tier is None or cores is None:
+        return None
+    if tier == 0:
+        return None  # kUnknown — legal, means "not reported"
+    expected = (1 if cores <= 2 else 2 if cores <= 4 else 3 if cores <= 12 else 4)
+    if tier != expected:
+        return Violation("C23_cpu_tier_vs_cores", Severity.ERROR,
+                         "cpu_performance_tier=%s contradicts cpu_cores=%s "
+                         "(Chromium GetTierFromCores would report %s)"
+                         % (tier, cores, expected),
+                         ("cpu_performance_tier", "cpu_cores"), tier, expected)
+    return None
+
+
+_PREDICATES = [_c1, _c2, _c3, _c4, _c5, _c6, _c8, _c10, _c11, _c14, _c15, _c17, _c21, _c22, _c23]
 
 
 def _run(ctx) -> CoherenceReport:

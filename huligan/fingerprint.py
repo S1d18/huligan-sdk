@@ -100,6 +100,10 @@ class FingerprintProfile:
     battery_discharging_time: float = float('inf')
 
     # Connection
+    # Chrome 152+ (WICG CPU Performance API). 0=unknown 1=low 2=mid 3=high
+    # 4=ultra. Derived from cpu_cores, never drawn independently — see
+    # cpu_tier_from_cores().
+    cpu_performance_tier: int = 0
     connection_type: str = "ethernet"  # ethernet, wifi, cellular, none, other (matches GUI Profile)
     connection_downlink: float = 10.0
     connection_effective_type: str = "4g"
@@ -373,6 +377,7 @@ class FingerprintProfile:
             "battery_charging_time": self.battery_charging_time,
             "battery_discharging_time": self.battery_discharging_time,
             # Connection
+            "cpu_performance_tier": self.cpu_performance_tier,
             "connection_type": self.connection_type,
             "connection_downlink": self.connection_downlink,
             "connection_effective_type": self.connection_effective_type,
@@ -464,6 +469,24 @@ class FingerprintProfile:
                 data[f"webgl_param_{gl_enum}"] = value
 
         return json.dumps(data, indent=2)
+
+
+def cpu_tier_from_cores(cores):
+    """Port of Chromium's cpu_performance::GetTierFromCores().
+
+    content/browser/cpu_performance/cpu_performance.cc — the fallback path that
+    decides navigator.cpuPerformance when no CPU-model match applies. Kept as an
+    exact port so our tier can never contradict our own hardwareConcurrency.
+    """
+    if cores is None or cores < 1:
+        return 0            # kUnknown
+    if cores <= 2:
+        return 1            # kLow
+    if cores <= 4:
+        return 2            # kMid
+    if cores <= 12:
+        return 3            # kHigh
+    return 4                # kUltra
 
 
 class FingerprintGenerator:
@@ -664,6 +687,7 @@ class FingerprintGenerator:
         speaker_models = ["Speakers (High Definition Audio)", "Internal Speakers", "Headphones"]
 
         return FingerprintProfile(
+            cpu_performance_tier=cpu_tier_from_cores(cpu_cores),
             screen_width=width,
             screen_height=height,
             avail_width=avail_w,

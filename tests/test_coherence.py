@@ -3,7 +3,9 @@ import huligan
 from huligan import validate_conf, validate_profile
 from huligan.fingerprint import FingerprintProfile
 
-_VALID_MEM = {0.25, 0.5, 1, 2, 4, 8}
+# Import rather than duplicate: a local copy here silently re-encoded the old
+# {0.25..8} ceiling after C5 was corrected to the real desktop set {2,4,8,16,32}.
+from huligan.coherence import _VALID_DEVICE_MEMORY as _VALID_MEM
 
 
 def _conf(**over):
@@ -115,3 +117,36 @@ def test_exports():
     for n in ("validate_profile", "validate_conf", "CoherenceReport",
               "Violation", "Severity", "CoherenceError"):
         assert hasattr(huligan, n), n
+
+
+def test_cpu_tier_port_matches_chromium_unittest():
+    """Our GetTierFromCores port must match Chromium's own unittest table.
+
+    Source of truth: content/browser/cpu_performance/cpu_performance_unittest.cc
+    TEST_F(CpuPerformanceTest, GetTierFromCores) in the Chrome 152 tree. If a
+    future major re-bands the tiers, this fails instead of silently emitting a
+    tier that contradicts our own hardwareConcurrency.
+    """
+    from huligan.fingerprint import cpu_tier_from_cores
+
+    chromium_table = {
+        1: 1, 2: 1,            # kLow
+        3: 2, 4: 2,            # kMid
+        5: 3, 8: 3, 12: 3,     # kHigh
+        13: 4, 16: 4, 96: 4,   # kUltra
+        0: 0, -42: 0,          # kUnknown
+    }
+    for cores, tier in chromium_table.items():
+        assert cpu_tier_from_cores(cores) == tier, "cores=%d" % cores
+
+
+def test_cpu_tier_vs_cores_c23():
+    # 8 cores lands in the 5..12 band -> kHigh (3)
+    assert validate_conf(_conf(cpu_cores=8, cpu_performance_tier=3)).ok
+
+    # tier 4 would need >=13 cores
+    r = validate_conf(_conf(cpu_cores=8, cpu_performance_tier=4))
+    assert not r.ok and "C23_cpu_tier_vs_cores" in _codes(r)
+
+    # 0 = kUnknown is always legal ("not reported")
+    assert validate_conf(_conf(cpu_cores=8, cpu_performance_tier=0)).ok

@@ -41,7 +41,11 @@ from typing import Optional
 #   v1 (2026-07-15): baseline. All keys emitted by render_conf() as of Chrome
 #      150 / Build 1 (screen, hardware, webgl, webgpu, noise seeds, audio, fonts,
 #      geolocation, media devices, battery, connection, extra, cdp, webrtc).
-CONF_SCHEMA_VERSION = 1
+# 2 (2026-08-30): + cpu_performance_tier — navigator.cpuPerformance,
+#     new surface in Chrome 152. Builds that need it set
+#     min_conf_schema=2 in huligan-releases/manifest.json so an older
+#     SDK refuses the build instead of launching without the key.
+CONF_SCHEMA_VERSION = 2
 
 
 # --- value formatters (return None to omit the line) ----------------------
@@ -158,6 +162,7 @@ def render_conf(v: dict, *, header: Optional[str] = None) -> str:
         ("device_memory", _i(g("device_memory"))),
         ("platform", _s(g("platform"))),
         ("max_touch_points", _i(g("max_touch_points"))),
+        ("cpu_performance_tier", _i(g("cpu_performance_tier"))),
     ])
 
     # WebGL (vendor/renderer omitted => real GPU passthrough, as the reference does)

@@ -58,6 +58,10 @@ NEW_KEYS = {
     # SDK<->GUI parity: the GUI Profile already emits these two; the SDK generator
     # was missing them (the BUG_2026-06-05 .conf-key drift this migration fixes).
     "battery_enabled", "connection_type",
+    # Chrome 152: navigator.cpuPerformance (WICG CPU Performance API). Derived
+    # from cpu_cores via the port of Chromium's GetTierFromCores, never drawn
+    # independently. Ships with CONF_SCHEMA_VERSION 2.
+    "cpu_performance_tier",
 }
 
 

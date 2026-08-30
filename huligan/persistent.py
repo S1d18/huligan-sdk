@@ -430,6 +430,9 @@ def launch_persistent(
         cdp_port=cdp_port,
         user_data_dir=user_data_dir,
         forwarder_port=forwarder_port,
+        # The forwarder probed the upstream at start(); pass the real
+        # answer rather than assuming either way.
+        proxy_udp_relay=bool(getattr(forwarder, "udp_supported", False)),
         proxy_info=proxy_info,
         webrtc_spoof_ip=webrtc_spoof_ip,
         language=lang,

@@ -64,20 +64,31 @@ def test_direct_proxy_when_no_forwarder():
     assert "EXCLUDE 9.9.9.9" in " ".join(args)
 
 
-def test_webrtc_disable_flag_only_without_spoof_ip():
-    # No spoof IP -> blanket disable flag present.
-    args, _ = _plan(proxy_info={"host": "9.9.9.9", "port": 1080, "type": "socks5"})
+def test_webrtc_disable_flag_follows_real_udp_relay():
+    """The UDP block is decided by what the forwarder can actually carry.
+
+    This test used to assert the flag was dropped whenever webrtc_spoof_ip was
+    set — i.e. it encoded the assumption that patch 11a_webrtc_spoof rewrites
+    ICE candidate IPs in the binary. 11a is not in SHIPPED_PATCHES, so that
+    setting was inert, and measurement on the 152 build through a real proxy
+    showed identical ICE output with the flag on and off.
+    """
+    proxy = {"host": "9.9.9.9", "port": 1080, "type": "socks5"}
+
+    # TCP-only upstream (the common case) -> block, so it is deliberate.
+    args, _ = _plan(proxy_info=proxy)
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args
     assert "--enforce-webrtc-ip-permission-check" in args
 
-    # Spoof IP set -> blanket disable omitted (binary rewrites at source),
-    # but the permission-check flag stays.
-    args2, _ = _plan(
-        proxy_info={"host": "9.9.9.9", "port": 1080, "type": "socks5"},
-        webrtc_spoof_ip="9.9.9.9",
-    )
-    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" not in args2
-    assert "--enforce-webrtc-ip-permission-check" in args2
+    # A spoof IP alone must NOT unblock: it does nothing without patch 11a.
+    args2, _ = _plan(proxy_info=proxy, webrtc_spoof_ip="9.9.9.9")
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args2
+
+    # A working UDP relay -> let WebRTC out, since STUN is genuinely proxied
+    # and the srflx candidate will carry the proxy exit IP.
+    args3, _ = _plan(proxy_info=proxy, proxy_udp_relay=True)
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" not in args3
+    assert "--enforce-webrtc-ip-permission-check" in args3
 
 
 def test_language_flags():

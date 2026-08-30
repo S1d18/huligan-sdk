@@ -48,6 +48,7 @@ def build_launch_plan(
     forwarder_port: Optional[int] = None,
     proxy_info: Optional[dict] = None,
     webrtc_spoof_ip: Optional[str] = None,
+    proxy_udp_relay: bool = False,
     language: Optional[str] = None,
     timezone: Optional[str] = None,
     cdp_mode: Optional[str] = None,
@@ -71,7 +72,15 @@ def build_launch_plan(
         proxy_info: Parsed proxy dict (``host``/``port``/``type``). Used for the
             direct ``--proxy-server`` (when there is no forwarder) and always for
             the leak-prevention ``host-resolver-rules`` / WebRTC flags.
-        webrtc_spoof_ip: When truthy, the patched binary rewrites WebRTC ICE
+        proxy_udp_relay: True when the local forwarder has a WORKING UDP relay
+            (its upstream accepted UDP ASSOCIATE). Only then is WebRTC's UDP
+            actually proxied, so only then is it safe to let it out. Defaults to
+            False: block.
+        webrtc_spoof_ip: NOTE — inert unless patch 11a_webrtc_spoof is in the
+            build, and it is NOT in SHIPPED_PATCHES. Kept for builds that
+            deliberately include it. It no longer decides the UDP-block flag;
+            that is proxy_udp_relay's job.
+            When the patch IS present, the binary rewrites WebRTC ICE
             candidate IPs at the source, so the blanket
             ``disable_non_proxied_udp`` flag is omitted. When falsy (and a proxy
             is set) the blanket flag is added to avoid a real-IP leak.
@@ -112,11 +121,20 @@ def build_launch_plan(
         args.append(
             f"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE {proxy_ip}"
         )
-        # With a spoof IP wired into the .conf, let the patched binary gather
-        # candidates and rewrite their IP at the source (port.cc). Without one,
-        # fall back to the blanket-disable flag — disabled WebRTC is its own
-        # signal (<1% of real users) but still better than leaking the real IP.
-        if not webrtc_spoof_ip:
+        # Let WebRTC's UDP out ONLY when the forwarder can actually carry it.
+        #
+        # This used to key off webrtc_spoof_ip, on the theory that the patched
+        # binary rewrites candidate IPs in port.cc. That patch (11a_webrtc_spoof)
+        # is not in SHIPPED_PATCHES, so the premise was false and the setting
+        # dead. Measured on the 152 build through a real proxy: flag on and flag
+        # off produced identical ICE output (one mDNS host candidate, no srflx),
+        # because a TCP-only forwarder gives STUN nowhere to go either way.
+        #
+        # With a UDP-capable upstream the relay is real, STUN reaches a server,
+        # and the srflx candidate carries the proxy exit IP — the shape a normal
+        # Chrome behind NAT has. Without one we block, which is what was
+        # happening anyway, now on purpose.
+        if not proxy_udp_relay:
             args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
         args.append("--enforce-webrtc-ip-permission-check")
 

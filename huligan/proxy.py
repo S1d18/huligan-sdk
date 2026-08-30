@@ -56,6 +56,10 @@ class ProxyForwarder:
         self.local_port = local_port
         self._server: Optional[asyncio.AbstractServer] = None
         self._active_tasks: set = set()
+        # None = not probed yet; True/False = upstream's answer to UDP ASSOCIATE.
+        # Chrome is told UDP is available only when this is True, so a proxy that
+        # cannot relay UDP degrades to TCP-only instead of black-holing WebRTC.
+        self.udp_supported: Optional[bool] = None
 
     @property
     def port(self) -> int:
@@ -74,6 +78,15 @@ class ProxyForwarder:
         actual_port = self.port
         log.info(f"Forwarder listening on {self.local_host}:{actual_port}")
         log.info(f"Upstream: {self.upstream_type}://{self.upstream_host}:{self.upstream_port}")
+
+        # Ask the upstream once whether it relays UDP. HTTP proxies have no UDP
+        # concept at all, so don't even try.
+        if self.upstream_type == "socks5":
+            self.udp_supported = await self._probe_upstream_udp()
+        else:
+            self.udp_supported = False
+        log.info("Upstream UDP ASSOCIATE: %s",
+                 "supported" if self.udp_supported else "not supported (TCP only)")
         return actual_port
 
     async def stop(self):
@@ -113,7 +126,18 @@ class ProxyForwarder:
             header = await reader.readexactly(4)
             ver, cmd, rsv, atyp = struct.unpack("!BBBB", header)
 
-            if cmd != 1:  # Only CONNECT supported
+            if cmd == 3:  # UDP ASSOCIATE
+                if not self.udp_supported:
+                    # 0x07 = command not supported. Chrome then falls back to
+                    # TCP-only, which is what happened before this branch existed.
+                    writer.write(struct.pack("!BBBBIH", 5, 7, 0, 1, 0, 0))
+                    await writer.drain()
+                    writer.close()
+                    return
+                await self._handle_udp_associate(reader, writer)
+                return
+
+            if cmd != 1:  # CONNECT is the only other command we serve
                 writer.write(struct.pack("!BBBBIH", 5, 7, 0, 1, 0, 0))
                 await writer.drain()
                 writer.close()
@@ -171,6 +195,157 @@ class ProxyForwarder:
         finally:
             writer.close()
             self._active_tasks.discard(task)
+
+    async def _socks5_handshake(self, reader, writer):
+        """Greet + authenticate against the upstream. Shared by CONNECT and UDP."""
+        writer.write(b"\x05\x02\x00\x02" if self.upstream_user else b"\x05\x01\x00")
+        await writer.drain()
+        resp = await reader.readexactly(2)
+        method = resp[1]
+        if method == 0x02:
+            if not self.upstream_user:
+                raise ConnectionError("upstream demands auth, none configured")
+            us = self.upstream_user.encode()
+            pw = (self.upstream_pass or "").encode()
+            writer.write(b"\x01" + bytes([len(us)]) + us + bytes([len(pw)]) + pw)
+            await writer.drain()
+            st = await reader.readexactly(2)
+            if st[1] != 0x00:
+                raise ConnectionError("upstream auth rejected")
+        elif method == 0xFF:
+            raise ConnectionError("upstream offered no acceptable auth method")
+
+    @staticmethod
+    async def _read_socks5_reply(reader):
+        """Read a SOCKS5 reply, returning (rep_code, bnd_host, bnd_port)."""
+        head = await reader.readexactly(4)
+        rep, atyp = head[1], head[3]
+        if atyp == 0x01:
+            host = socket.inet_ntoa(await reader.readexactly(4))
+        elif atyp == 0x03:
+            ln = (await reader.readexactly(1))[0]
+            host = (await reader.readexactly(ln)).decode("utf-8", "replace")
+        elif atyp == 0x04:
+            host = socket.inet_ntop(socket.AF_INET6, await reader.readexactly(16))
+        else:
+            raise ConnectionError(f"upstream returned bad ATYP {atyp}")
+        port = struct.unpack("!H", await reader.readexactly(2))[0]
+        return rep, host, port
+
+    async def _probe_upstream_udp(self) -> bool:
+        """One-shot capability check: does the upstream honour UDP ASSOCIATE?
+
+        Answering 0x00 is necessary but not sufficient — some proxies accept the
+        command and then relay nothing. We only trust a successful reply here;
+        a dead relay surfaces as WebRTC simply not gathering srflx candidates,
+        which is the same place we were before.
+        """
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.upstream_host, self.upstream_port),
+                timeout=8)
+        except Exception as e:
+            log.debug("UDP probe: cannot reach upstream (%s)", e)
+            return False
+        try:
+            await self._socks5_handshake(reader, writer)
+            writer.write(b"\x05\x03\x00\x01" + socket.inet_aton("0.0.0.0")
+                         + struct.pack("!H", 0))
+            await writer.drain()
+            rep, _host, _port = await asyncio.wait_for(
+                self._read_socks5_reply(reader), timeout=8)
+            return rep == 0x00
+        except Exception as e:
+            log.debug("UDP probe failed: %s", e)
+            return False
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    async def _handle_udp_associate(self, reader, writer):
+        """Relay Chrome's UDP datagrams through the upstream's UDP relay.
+
+        The association lives exactly as long as this TCP control connection,
+        per RFC 1928 — when Chrome closes it, we tear the relay down.
+        """
+        loop = asyncio.get_running_loop()
+        up_reader = up_writer = None
+        local_transport = None
+        try:
+            # Our own association with the upstream.
+            up_reader, up_writer = await asyncio.wait_for(
+                asyncio.open_connection(self.upstream_host, self.upstream_port),
+                timeout=10)
+            await self._socks5_handshake(up_reader, up_writer)
+            up_writer.write(b"\x05\x03\x00\x01" + socket.inet_aton("0.0.0.0")
+                            + struct.pack("!H", 0))
+            await up_writer.drain()
+            rep, bnd_host, bnd_port = await self._read_socks5_reply(up_reader)
+            if rep != 0x00:
+                writer.write(struct.pack("!BBBBIH", 5, 7, 0, 1, 0, 0))
+                await writer.drain()
+                writer.close()
+                return
+            # A relay bound to 0.0.0.0 is reachable at the proxy's own address.
+            if bnd_host in ("0.0.0.0", ""):
+                bnd_host = self.upstream_host
+            upstream_relay = (bnd_host, bnd_port)
+
+            state = {"client": None}
+
+            class _Relay(asyncio.DatagramProtocol):
+                """Verbatim pass-through both ways.
+
+                The SOCKS5 UDP header is identical at both hops, so nothing needs
+                re-framing: whatever Chrome encapsulated is exactly what the
+                upstream relay expects, and vice versa.
+                """
+
+                def connection_made(self, transport):
+                    self.transport = transport
+
+                def datagram_received(self, data, addr):
+                    if addr == upstream_relay:
+                        if state["client"]:
+                            self.transport.sendto(data, state["client"])
+                    else:
+                        # First datagram from Chrome fixes its source endpoint.
+                        state["client"] = addr
+                        if data[:2] == b"\x00\x00" and data[2] == 0x00:
+                            self.transport.sendto(data, upstream_relay)
+                        # FRAG != 0 is dropped: fragmentation is optional in
+                        # RFC 1928 and Chrome never emits it.
+
+            local_transport, _proto = await loop.create_datagram_endpoint(
+                _Relay, local_addr=(self.local_host, 0))
+            udp_host, udp_port = local_transport.get_extra_info("sockname")[:2]
+
+            writer.write(b"\x05\x00\x00\x01" + socket.inet_aton(udp_host)
+                         + struct.pack("!H", udp_port))
+            await writer.drain()
+            log.info("UDP relay up: chrome -> %s:%d -> upstream %s:%d",
+                     udp_host, udp_port, upstream_relay[0], upstream_relay[1])
+
+            # Hold the association open until Chrome hangs up.
+            await reader.read()
+        except Exception as e:
+            log.debug("UDP associate failed: %s", e)
+            try:
+                writer.write(struct.pack("!BBBBIH", 5, 1, 0, 1, 0, 0))
+                await writer.drain()
+            except Exception:
+                pass
+        finally:
+            if local_transport is not None:
+                local_transport.close()
+            for w in (up_writer, writer):
+                try:
+                    if w:
+                        w.close()
+                except Exception:
+                    pass
 
     async def _connect_socks5(self, target_host: str, target_port: int):
         """Connect to target through upstream SOCKS5 proxy with auth."""

@@ -10,6 +10,22 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-08-30): Chrome 152.0.7977.65 major bump (151 -> 152). BUILD_NUMBER
+#   resets to 1 on the major. Three things beyond the version bump:
+#   1. NEW .conf KEY cpu_performance_tier (CONF_SCHEMA_VERSION 1 -> 2) behind
+#      Chrome 152's CPU Performance API. Derived from cpu_cores via a port of
+#      Chromium's GetTierFromCores, so it can never contradict the reported core
+#      count. Builds needing it carry min_conf_schema=2 in the release manifest.
+#   2. TLS pins CUT to AddTLSServerHandshakePadding only. kTLSTrustAnchorIDs went
+#      DISABLED_BY_DEFAULT (151) -> ENABLED_BY_DEFAULT (152) in net/base/
+#      features.cc, so the 151-era pin stopped hiding an anomaly and started
+#      creating one: it removed ClientHello ext 51764 that real Chrome 152 sends.
+#      Measured against stock — padding-only pin matches exactly
+#      (t13d1518h2_8daaf6152771_e2d80978ab2e, 20 extensions).
+#   3. outer_width/outer_height are no longer emitted, and deviceMemory now goes
+#      up to 32 (the 8 ceiling was Android-only and had been wrong for two
+#      majors). Both were producing values real Chrome cannot report.
+#
 # Build 1 (2026-08-06): Chrome 151.0.7922.76 major bump (150 -> 151). BUILD_NUMBER
 #   resets to 1 on the major. One real change beyond the version bump:
 #   launch_plan._STEALTH_DISABLE_FEATURES gained AddTLSServerHandshakePadding.
@@ -68,7 +84,7 @@ from the public binary mirror.
 BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "151.0.7922.76"
+CHROME_VERSION = "152.0.7977.65"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

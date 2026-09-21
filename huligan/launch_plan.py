@@ -219,7 +219,12 @@ def get_default_stealth_args() -> list:
     Returns exactly the runtime-INDEPENDENT subset::
 
         --no-sandbox
-        --disable-features=TLSTrustAnchorIDs,TlsMldsaSignatures,AddTLSServerHandshakePadding
+        --disable-features=<contents of _STEALTH_DISABLE_FEATURES>
+
+    That set is version-specific and shrinks/grows per major (152 dropped two of
+    the three names; 153 deleted kTlsMldsaSignatures from Chromium outright, so
+    pinning it would have been a no-op anyway). Read the constant at the module
+    top for the current list — never hard-code these names at a call site.
 
     Deliberately EXCLUDED (they need runtime values you supply yourself):
       * proxy / host-resolver / WebRTC leak flags (need the proxy + spoof IP)

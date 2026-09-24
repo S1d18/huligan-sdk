@@ -13,8 +13,9 @@ the DevTools WebSocket, and ref-counts + idle-GCs the processes.
 Security (loopback-first):
   * binds ``127.0.0.1`` by default; a non-loopback ``host`` is refused without a token;
   * an Origin/Host guard rejects browser-originated (page) connections, mirroring the
-    binary's ``05_cdp_stealth`` rule - the real CDP ports run ``--remote-allow-origins=*``
-    with Chrome's own check disabled, so this mux is the only line of defense.
+    binary's ``05_cdp_stealth`` rule. The real CDP ports run WITHOUT
+    ``--remote-allow-origins``, so Chrome itself also refuses any WebSocket carrying
+    an Origin; the mux strips the Origin it has already vetted before forwarding.
 
 Zero new dependencies: pure ``asyncio``. The WebSocket leg is a transparent TCP splice
 after the ``101`` handshake (both legs are plaintext loopback ``ws://``), reusing the
@@ -236,11 +237,18 @@ def _parse_ws_target(target: str) -> Tuple[Optional[str], Optional[str]]:
 
 def _rebuild_upgrade_request(real_path: str, raw_lines: List[str], real_port: int) -> bytes:
     """Reconstruct the client's WebSocket upgrade for the backend, rewriting only
-    the request path and Host so the client's Sec-WebSocket-Key survives intact."""
+    the request path and Host so the client's Sec-WebSocket-Key survives intact.
+
+    The Origin header is dropped: the mux has already vetted it
+    (:func:`_origin_allowed`), and the backend Chrome runs without
+    ``--remote-allow-origins`` so it would reject any Origin with 403."""
     out = [f"GET {real_path} HTTP/1.1"]
     for ln in raw_lines:
-        if ln.lower().startswith("host:"):
+        low = ln.lower()
+        if low.startswith("host:"):
             out.append(f"Host: 127.0.0.1:{real_port}")
+        elif low.startswith("origin:"):
+            continue
         else:
             out.append(ln)
     return ("\r\n".join(out) + "\r\n\r\n").encode("latin-1", "replace")

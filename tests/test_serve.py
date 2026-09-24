@@ -64,6 +64,18 @@ def test_rebuild_upgrade_request_keeps_key_rewrites_host_and_path():
     assert out.endswith("\r\n\r\n")
 
 
+def test_rebuild_upgrade_request_drops_vetted_origin():
+    # The mux has already applied its own Origin policy; the backend Chrome runs
+    # without --remote-allow-origins (SEC-07) and would 403 any Origin, so a
+    # mux-allowed client (loopback page / --allow-origin) must reach it bare.
+    raw = ["Host: 127.0.0.1:9222", "Upgrade: websocket", "Connection: Upgrade",
+           "Origin: http://localhost:3000", "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==",
+           "Sec-WebSocket-Version: 13"]
+    out = srv._rebuild_upgrade_request("/devtools/browser/xyz", raw, 55123).decode()
+    assert "origin:" not in out.lower()
+    assert "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==" in out
+
+
 # --- lifecycle (fake process, no Chrome) ----------------------------------
 
 class _FakeResult:

@@ -35,7 +35,9 @@ def test_minimal_no_proxy():
     assert args[0] == "chrome"
     assert "--no-sandbox" in args
     assert "--remote-debugging-port=9222" in args
-    assert "--remote-allow-origins=*" in args
+    # SEC-07: no wildcard (or any) allow-origins - a web page must not be able
+    # to open the DevTools WebSocket. Automation clients send no Origin.
+    assert not any(a.startswith("--remote-allow-origins") for a in args)
     assert "--user-data-dir=ud" in args
     # No proxy -> no proxy/leak flags at all.
     assert not any(a.startswith("--proxy-server") for a in args)

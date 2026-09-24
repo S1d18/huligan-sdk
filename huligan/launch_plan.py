@@ -99,9 +99,14 @@ def build_launch_plan(
     """
     args = [str(chrome_path), "--no-sandbox"]
 
-    # CDP
+    # CDP. Deliberately NO --remote-allow-origins: Chrome then refuses any
+    # DevTools WebSocket whose handshake carries an Origin header, i.e. one
+    # opened by a web page, while automation clients (Playwright, Python
+    # sockets) send no Origin and are unaffected. With "*" any site the user
+    # visited could open ws://127.0.0.1:<port>/devtools/browser/<id> and drive
+    # the browser (SEC-07). The /json endpoints are already Origin-gated by
+    # patch 05_cdp_stealth; `huligan serve` strips the Origin it has vetted.
     args.append(f"--remote-debugging-port={cdp_port}")
-    args.append("--remote-allow-origins=*")
 
     # Proxy: a running local forwarder (no-auth SOCKS5) takes precedence over a
     # direct proxy-server, because Chrome cannot do SOCKS5 auth natively.

@@ -38,6 +38,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9222
 DEFAULT_IDLE_TIMEOUT = 300.0
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1", "")
+# urlsplit().hostname is lower-cased and strips the IPv6 brackets.
+_LOOPBACK_ORIGIN_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 @dataclass
@@ -179,9 +181,16 @@ def _origin_allowed(headers: dict, allow_origins) -> bool:
     origin = headers.get("origin")
     if not origin:
         return True
-    o = origin.lower()
-    if (o.startswith("http://localhost") or o.startswith("http://127.0.0.1")
-            or o.startswith("https://localhost") or o.startswith("https://127.0.0.1")):
+    # Exact hostname match on the PARSED origin. A prefix test on the raw string
+    # let "http://localhost.evil.com" / "http://127.0.0.1.nip.io" through.
+    try:
+        parts = urllib.parse.urlsplit(origin.strip())
+        hostname = parts.hostname
+    except ValueError:
+        parts, hostname = None, None
+    if (parts is not None and parts.scheme.lower() in ("http", "https")
+            and hostname in _LOOPBACK_ORIGIN_HOSTS
+            and not parts.username and not parts.password):
         return True
     return origin in tuple(allow_origins)
 

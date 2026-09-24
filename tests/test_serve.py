@@ -148,3 +148,28 @@ def test_nonloopback_without_token_refused():
         with pytest.raises(RuntimeError):
             await mux.start()
     asyncio.run(run())
+
+
+def test_origin_guard_rejects_loopback_lookalikes():
+    # A prefix check let an attacker's page whose host merely STARTS with a
+    # loopback name reach CDP through the mux while `huligan serve` runs.
+    for evil in (
+        "http://localhost.evil.com",
+        "http://localhost.evil.com:9222",
+        "https://127.0.0.1.nip.io",
+        "http://127.0.0.1.evil.com:80",
+        "http://localhostx",
+        "file://localhost",
+        "http://user@evil.com",
+        "null",
+    ):
+        assert srv._origin_allowed({"origin": evil}, ()) is False, evil
+    for ok in (
+        "http://localhost",
+        "http://localhost:3000",
+        "https://LOCALHOST:8443",
+        "http://127.0.0.1:9222",
+        "http://[::1]:9222",
+        "https://[::1]",
+    ):
+        assert srv._origin_allowed({"origin": ok}, ()) is True, ok

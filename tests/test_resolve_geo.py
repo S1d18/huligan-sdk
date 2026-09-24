@@ -81,3 +81,39 @@ def test_geoip_appends_en_fallbacks(patched, monkeypatch):
     monkeypatch.setattr(g, "GeoIPManager", lambda *a, **k: _Mgr(geo))
     out = resolve_launch_geo("socks5://1.2.3.4:1080")
     assert out["languages"] == "ru-RU,ru,en-US,en"
+
+
+# --- SYS-07: GeoIP follows the proxy EXIT IP, not the gateway host ----------
+
+
+def _capture_lookup(monkeypatch):
+    seen = []
+
+    class _Rec(_Mgr):
+        def lookup(self, ip):
+            seen.append(ip)
+            return super().lookup(ip)
+
+    monkeypatch.setattr(g, "GeoIPManager", lambda *a, **k: _Rec(_geo()))
+    return seen
+
+
+def test_geoip_keyed_on_proxy_exit_not_host(patched, monkeypatch):
+    seen = _capture_lookup(monkeypatch)
+    resolve_launch_geo("socks5://u:p@1.2.3.4:1080")   # host=1.2.3.4, exit=8.8.8.8
+    assert seen == ["8.8.8.8"]
+
+
+def test_geoip_uses_exit_even_when_webrtc_pinned(patched, monkeypatch):
+    seen = _capture_lookup(monkeypatch)
+    res = g._resolve_geo(g.parse_proxy_string("socks5://1.2.3.4:1080"), resolve_webrtc=False)
+    assert seen == ["8.8.8.8"]
+    assert res.webrtc_spoof_ipv4 is None
+
+
+def test_geoip_falls_back_to_host_when_exit_probe_fails(patched, monkeypatch):
+    seen = _capture_lookup(monkeypatch)
+    monkeypatch.setattr(g, "detect_exit_ip", lambda info, timeout=4.0: None)
+    out = resolve_launch_geo("socks5://1.2.3.4:1080")
+    assert seen == ["1.2.3.4"]
+    assert out["webrtc_spoof_ipv4"] is None

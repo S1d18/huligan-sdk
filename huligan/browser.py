@@ -180,8 +180,18 @@ class Browser:
         # User overrides (timezone / language kwargs) skip the lookup
         # for that field but the IP-probe still runs so 4b can spoof.
         public_ip_for_geo: Optional[str] = None
+        proxy_exit_ip: Optional[str] = None
         if self._proxy_info:
-            public_ip_for_geo = self._proxy_info["host"]
+            # GeoIP follows the proxy's EXIT IP, not its host (a residential
+            # gateway's country != the exit's) - audit SYS-07. One probe feeds
+            # both GeoIP and the WebRTC spoof below.
+            proxy_exit_ip = detect_exit_ip(self._proxy_info, timeout=4.0)
+            public_ip_for_geo = proxy_exit_ip or self._proxy_info["host"]
+            if not proxy_exit_ip and not self._timezone_override:
+                log.warning(
+                    "Proxy exit-IP probe failed; GeoIP falls back to the proxy host "
+                    f"{self._proxy_info['host']} (may be the gateway's country)"
+                )
         else:
             try:
                 public_ip_for_geo = detect_local_public_ip(timeout=4.0)
@@ -217,7 +227,7 @@ class Browser:
             self._webrtc_spoof_ip = existing
             log.info(f"WebRTC spoof IPv4: {existing} (from profile)")
         elif self._proxy_info:
-            exit_ip = detect_exit_ip(self._proxy_info, timeout=4.0)
+            exit_ip = proxy_exit_ip
             if exit_ip:
                 self._webrtc_spoof_ip = exit_ip
                 log.info(f"WebRTC spoof IPv4: {exit_ip}")

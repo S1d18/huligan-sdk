@@ -464,21 +464,35 @@ def _resolve_geo(
     how the result reaches the binary.
 
     Mirrors exactly what ``Browser.start`` / ``launch_persistent`` do:
-      * the geo-source IP is the proxy host, else the machine's own public IP;
+      * the geo-source IP is the proxy's measured *exit* IP (falling back to the
+        proxy host only if that probe fails), else the machine's own public IP;
       * GeoIP is skipped entirely when ``timezone`` is given explicitly (an
         explicit timezone also suppresses GeoIP-derived language + geolocation,
         matching launch precedence);
       * the WebRTC spoof IP is the proxy's *exit* IP (or the local public IP with
-        no proxy). ``resolve_webrtc=False`` skips that probe (used when the .conf
-        already pins ``webrtc_local_ipv4``).
+        no proxy) - the same single probe feeds GeoIP. ``resolve_webrtc=False``
+        does not change the GeoIP source (used when the .conf already pins
+        ``webrtc_local_ipv4``).
 
     Fails open: any probe/lookup error leaves the corresponding field ``None``.
     """
     geo: Optional[GeoIPResult] = None
     public_ip: Optional[str] = None
+    exit_ip: Optional[str] = None
     if geoip:
         if proxy_info:
-            public_ip = proxy_info.get("host")
+            # GeoIP must follow the proxy's EXIT IP, not its host: residential /
+            # rotating proxies are a gateway (gate.provider.com) whose country
+            # differs from the exit. Keying tz/lang off the gateway while WebRTC
+            # reports the exit is exactly the mismatch detectors flag (audit SYS-07).
+            if resolve_webrtc or not timezone:
+                exit_ip = detect_exit_ip(proxy_info, timeout=probe_timeout)
+            public_ip = exit_ip or proxy_info.get("host")
+            if not exit_ip and not timezone:
+                log.warning(
+                    "Proxy exit-IP probe failed; GeoIP falls back to the proxy host "
+                    f"{proxy_info.get('host')} (may be the gateway's country, not the exit's)"
+                )
         else:
             try:
                 public_ip = detect_local_public_ip(timeout=probe_timeout)
@@ -503,7 +517,7 @@ def _resolve_geo(
     webrtc_spoof_ipv4: Optional[str] = None
     if resolve_webrtc and geoip:
         if proxy_info:
-            webrtc_spoof_ipv4 = detect_exit_ip(proxy_info, timeout=probe_timeout)
+            webrtc_spoof_ipv4 = exit_ip
             if webrtc_spoof_ipv4:
                 log.info(f"WebRTC spoof IPv4: {webrtc_spoof_ipv4} (proxy exit)")
         elif public_ip:

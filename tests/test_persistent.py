@@ -361,3 +361,124 @@ def test_kill_does_not_tear_down_proxy_while_chrome_survives(tmp_path):
     proc.die()
     assert r.stop(timeout=0.05) is True
     assert fwd.stopped is True
+
+
+# --- LAUNCH-01: a failed launch rolls back everything it created -----------
+
+class _FakeForwarder:
+    instances = []
+
+    def __init__(self, fail_start=False, **kw):
+        self.fail_start = fail_start
+        self.started = False
+        self.stopped = False
+        self.udp_supported = False
+        _FakeForwarder.instances.append(self)
+
+    async def start(self):
+        if self.fail_start:
+            raise OSError("bind failed")
+        self.started = True
+        return 45678
+
+    async def stop(self):
+        self.stopped = True
+
+
+@pytest.fixture
+def isolated_tmp(tmp_path, monkeypatch):
+    """Route tempfile.* (temp conf copy, temp user-data-dir) into tmp_path."""
+    import tempfile
+    d = tmp_path / "systmp"
+    d.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(d))
+    _FakeForwarder.instances = []
+    return d
+
+
+def _loop_threads():
+    return [t for t in threading.enumerate() if t.name == "huligan-persistent-loop"]
+
+
+def test_forwarder_failure_removes_temp_conf(captured_popen, isolated_tmp, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        persistent, "ProxyForwarder", lambda **kw: _FakeForwarder(fail_start=True, **kw)
+    )
+    conf = _conf(tmp_path)
+    before = len(_loop_threads())
+    with pytest.raises(OSError, match="bind failed"):
+        persistent.launch_persistent(
+            profile_path=conf,
+            proxy="socks5://user:pw@9.9.9.9:1080",
+            timezone="Europe/Berlin",           # forces a temp conf copy
+            user_data_dir=tmp_path / "ud",
+            geoip=False,
+        )
+    assert list(isolated_tmp.iterdir()) == []   # no huligan_launch_*.conf left
+    assert not captured_popen
+    time.sleep(0.1)
+    assert len(_loop_threads()) <= before
+
+
+def test_cdp_timeout_rolls_back_process_forwarder_conf_and_temp_udd(
+    captured_popen, isolated_tmp, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(persistent, "ProxyForwarder", lambda **kw: _FakeForwarder(**kw))
+
+    def never_ready(port, process, timeout=15.0):
+        raise TimeoutError("CDP not ready")
+    monkeypatch.setattr(persistent, "_wait_for_cdp", never_ready)
+
+    conf = _conf(tmp_path)
+    before = len(_loop_threads())
+    with pytest.raises(TimeoutError):
+        persistent.launch_persistent(
+            profile_path=conf,
+            proxy="socks5://user:pw@9.9.9.9:1080",
+            timezone="Europe/Berlin",
+            geoip=False,
+            wait_for_cdp=True,                   # user_data_dir=None -> temp dir
+        )
+    proc = captured_popen[0]
+    assert proc.poll() is not None               # Chrome was terminated
+    fwd = _FakeForwarder.instances[0]
+    assert fwd.started and fwd.stopped           # forwarder torn down
+    assert list(isolated_tmp.iterdir()) == []    # temp conf + temp user-data-dir gone
+    time.sleep(0.1)
+    assert len(_loop_threads()) <= before
+
+
+def test_launch_session_enter_failure_leaves_nothing(
+    captured_popen, isolated_tmp, tmp_path, monkeypatch
+):
+    def never_ready(port, process, timeout=15.0):
+        raise TimeoutError("CDP not ready")
+    monkeypatch.setattr(persistent, "_wait_for_cdp", never_ready)
+
+    conf = _conf(tmp_path)
+    session = persistent.LaunchSession(
+        profile_path=conf, timezone="Europe/Berlin", geoip=False, wait_for_cdp=True,
+    )
+    with pytest.raises(TimeoutError):
+        with session:
+            pytest.fail("body must not run")
+    assert session.result is None
+    assert captured_popen[0].poll() is not None
+    assert list(isolated_tmp.iterdir()) == []
+
+
+def test_explicit_user_data_dir_is_never_deleted_on_rollback(
+    captured_popen, isolated_tmp, tmp_path, monkeypatch
+):
+    def never_ready(port, process, timeout=15.0):
+        raise TimeoutError("CDP not ready")
+    monkeypatch.setattr(persistent, "_wait_for_cdp", never_ready)
+    ud = tmp_path / "ud"
+    ud.mkdir()
+    (ud / "Cookies").write_text("keep me")
+    with pytest.raises(TimeoutError):
+        persistent.launch_persistent(
+            profile_path=_conf(tmp_path), user_data_dir=ud, geoip=False,
+            conf_geo="off", wait_for_cdp=True,
+        )
+    assert (ud / "Cookies").read_text() == "keep me"

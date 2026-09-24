@@ -434,91 +434,92 @@ def launch_persistent(
 
     launch_conf_path = profile_path
     temp_conf: Optional[Path] = None
-    if conf_geo == "inplace":
-        update_conf_keys(profile_path, updates)
-    elif conf_geo == "copy" and updates:
-        fd, tmp = tempfile.mkstemp(suffix=".conf", prefix="huligan_launch_")
-        os.close(fd)
-        temp_conf = Path(tmp)
-        shutil.copyfile(profile_path, temp_conf)
-        update_conf_keys(temp_conf, updates)
-        launch_conf_path = temp_conf
-        log.info(f"Launching from temp .conf copy (saved profile untouched): {temp_conf}")
-
-    # --- proxy forwarder on a background loop (only when auth needed) ----
     bgloop: Optional[_BackgroundLoop] = None
     forwarder: Optional[ProxyForwarder] = None
     forwarder_port: Optional[int] = None
-    if proxy_info and proxy_info.get("user") and proxy_info.get("password"):
-        bgloop = _BackgroundLoop()
-        forwarder = ProxyForwarder(
-            upstream_host=proxy_info["host"],
-            upstream_port=proxy_info["port"],
-            upstream_user=proxy_info["user"],
-            upstream_pass=proxy_info["password"],
-            upstream_type=proxy_info["type"],
-        )
-        try:
+    process: Optional[subprocess.Popen] = None
+    temp_user_data_dir: Optional[Path] = None
+
+    # Everything from here on creates resources (temp conf, background loop,
+    # forwarder, temp user-data-dir, the Chrome process). A failure at ANY step
+    # before the handle is returned must release all of them, or a half-started
+    # launch leaks a live Chrome, a proxy port and a .conf copy.
+    try:
+        if conf_geo == "inplace":
+            update_conf_keys(profile_path, updates)
+        elif conf_geo == "copy" and updates:
+            fd, tmp = tempfile.mkstemp(suffix=".conf", prefix="huligan_launch_")
+            os.close(fd)
+            temp_conf = Path(tmp)
+            shutil.copyfile(profile_path, temp_conf)
+            update_conf_keys(temp_conf, updates)
+            launch_conf_path = temp_conf
+            log.info(f"Launching from temp .conf copy (saved profile untouched): {temp_conf}")
+
+        # --- proxy forwarder on a background loop (only when auth needed) ----
+        if proxy_info and proxy_info.get("user") and proxy_info.get("password"):
+            bgloop = _BackgroundLoop()
+            forwarder = ProxyForwarder(
+                upstream_host=proxy_info["host"],
+                upstream_port=proxy_info["port"],
+                upstream_user=proxy_info["user"],
+                upstream_pass=proxy_info["password"],
+                upstream_type=proxy_info["type"],
+            )
             forwarder_port = bgloop.run_coro(forwarder.start(), timeout=10.0)
             log.info(f"Forwarder ready on 127.0.0.1:{forwarder_port}")
-        except Exception:
-            # Roll back the loop if the forwarder failed to bind.
-            bgloop.shutdown(timeout=3.0)
-            raise
 
-    # --- ports + user-data-dir ------------------------------------------
-    if cdp_port is None:
-        cdp_port = find_free_port()
+        # --- ports + user-data-dir ------------------------------------------
+        if cdp_port is None:
+            cdp_port = find_free_port()
 
-    if user_data_dir is not None:
-        user_data_dir = Path(user_data_dir).expanduser()
-    else:
-        user_data_dir = Path(tempfile.mkdtemp(prefix="huligan_"))
+        if user_data_dir is not None:
+            user_data_dir = Path(user_data_dir).expanduser()
+        else:
+            temp_user_data_dir = Path(tempfile.mkdtemp(prefix="huligan_"))
+            user_data_dir = temp_user_data_dir
 
-    # --- build argv/env via the shared plan -----------------------------
-    # The binary reads launch_conf_path (the temp copy under conf_geo="copy",
-    # else the saved profile).
-    chrome_args, env = build_launch_plan(
-        chrome_path=chrome,
-        profile_path=launch_conf_path,
-        cdp_port=cdp_port,
-        user_data_dir=user_data_dir,
-        forwarder_port=forwarder_port,
-        # The forwarder probed the upstream at start(); pass the real
-        # answer rather than assuming either way.
-        proxy_udp_relay=bool(getattr(forwarder, "udp_supported", False)),
-        proxy_info=proxy_info,
-        webrtc_spoof_ip=webrtc_spoof_ip,
-        language=lang,
-        timezone=tz,
-        cdp_mode=cdp_mode_from_conf(launch_conf_path),
-        headless=headless,
-        extra_args=extra_args,
-        url=url,
-    )
+        # --- build argv/env via the shared plan -----------------------------
+        # The binary reads launch_conf_path (the temp copy under conf_geo="copy",
+        # else the saved profile).
+        chrome_args, env = build_launch_plan(
+            chrome_path=chrome,
+            profile_path=launch_conf_path,
+            cdp_port=cdp_port,
+            user_data_dir=user_data_dir,
+            forwarder_port=forwarder_port,
+            # The forwarder probed the upstream at start(); pass the real
+            # answer rather than assuming either way.
+            proxy_udp_relay=bool(getattr(forwarder, "udp_supported", False)),
+            proxy_info=proxy_info,
+            webrtc_spoof_ip=webrtc_spoof_ip,
+            language=lang,
+            timezone=tz,
+            cdp_mode=cdp_mode_from_conf(launch_conf_path),
+            headless=headless,
+            extra_args=extra_args,
+            url=url,
+        )
 
-    # --- launch ---------------------------------------------------------
-    try:
+        # --- launch ---------------------------------------------------------
         process = subprocess.Popen(chrome_args, env=env, **(popen_kwargs or {}))
-    except Exception:
-        # Roll back the forwarder/loop we started before the failure.
-        if forwarder is not None and bgloop is not None:
-            try:
-                bgloop.run_coro(forwarder.stop(), timeout=3.0)
-            except Exception:
-                pass
-        if bgloop is not None:
-            bgloop.shutdown(timeout=3.0)
-        if temp_conf is not None:
-            try:
-                temp_conf.unlink()
-            except OSError:
-                pass
+        log.info(f"Chrome started (PID: {process.pid}, CDP: {cdp_port})")
+
+        if wait_for_cdp:
+            _wait_for_cdp(cdp_port, process, timeout=cdp_timeout)
+    except BaseException:
+        _rollback_launch(
+            process=process,
+            forwarder=forwarder,
+            bgloop=bgloop,
+            temp_conf=temp_conf,
+            temp_user_data_dir=temp_user_data_dir,
+            cdp_port=cdp_port,
+            profile_path=profile_path,
+        )
         raise
 
-    log.info(f"Chrome started (PID: {process.pid}, CDP: {cdp_port})")
-
-    result = LaunchResult(
+    return LaunchResult(
         process=process,
         cdp_port=cdp_port,
         profile_path=profile_path,
@@ -530,10 +531,47 @@ def launch_persistent(
         temp_conf=temp_conf,
     )
 
-    if wait_for_cdp:
-        _wait_for_cdp(cdp_port, process, timeout=cdp_timeout)
 
-    return result
+def _rollback_launch(
+    *,
+    process: Optional[subprocess.Popen],
+    forwarder: Optional[ProxyForwarder],
+    bgloop: Optional[_BackgroundLoop],
+    temp_conf: Optional[Path],
+    temp_user_data_dir: Optional[Path],
+    cdp_port: Optional[int],
+    profile_path: Path,
+) -> None:
+    """Undo a partially completed :func:`launch_persistent` (best effort).
+
+    Reuses :meth:`LaunchResult.stop` so the rollback obeys the same rule as a
+    normal stop: if Chrome was started and refuses to exit, its temp ``.conf``
+    and forwarder are LEFT IN PLACE (a live Chrome without its conf reverts to
+    the real fingerprint) and an error is logged. A user-supplied
+    ``user_data_dir`` is never touched; only a temp dir created here is removed.
+    """
+    try:
+        handle = LaunchResult(
+            process=process,
+            cdp_port=cdp_port or 0,
+            profile_path=profile_path,
+            user_data_dir=temp_user_data_dir or Path(),
+            forwarder=forwarder,
+            bgloop=bgloop,
+            temp_conf=temp_conf,
+        )
+        exited = handle.stop(timeout=5.0)
+    except Exception as e:  # never mask the original launch error
+        log.error(f"Launch rollback failed: {e}")
+        return
+    if not exited:
+        log.error(
+            f"Launch rollback: Chrome (PID {getattr(process, 'pid', None)}) is still "
+            f"running; its .conf and forwarder were kept"
+        )
+        return
+    if temp_user_data_dir is not None:
+        shutil.rmtree(temp_user_data_dir, ignore_errors=True)
 
 
 class LaunchSession:

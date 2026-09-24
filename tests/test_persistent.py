@@ -278,3 +278,86 @@ def test_launchresult_popen_contract():
     r.stop()
     r.stop()  # idempotent
     assert fp.poll() == 0
+
+
+# --- PROC-01: stop() only succeeds once Chrome has really exited -----------
+
+class StubbornPopen(FakePopen):
+    """A Chrome that ignores terminate() and kill() until ``die()`` is called."""
+
+    def __init__(self, args=("chrome",), env=None, **kw):
+        super().__init__(args, env, **kw)
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+    def wait(self, timeout=None):
+        if self._code is None:
+            import subprocess
+            raise subprocess.TimeoutExpired("chrome", timeout)
+        return self._code
+
+    def terminate(self):
+        self.terminate_calls += 1
+
+    def kill(self):
+        self.kill_calls += 1
+
+    def die(self):
+        self._code = 1
+
+
+class _SpyForwarder:
+    def __init__(self):
+        self.stopped = False
+
+    async def stop(self):
+        self.stopped = True
+
+
+def test_stop_keeps_conf_and_forwarder_while_chrome_survives(tmp_path):
+    temp_conf = tmp_path / "huligan_launch_x.conf"
+    temp_conf.write_text("timezone=Europe/Berlin\n", encoding="utf-8")
+    proc = StubbornPopen()
+    bgloop = persistent._BackgroundLoop()
+    fwd = _SpyForwarder()
+    r = persistent.LaunchResult(
+        process=proc,
+        cdp_port=9222,
+        profile_path=tmp_path / "p.conf",
+        user_data_dir=tmp_path / "ud",
+        forwarder=fwd,
+        bgloop=bgloop,
+        temp_conf=temp_conf,
+    )
+
+    # Chrome refuses to die: stop() must report failure and touch NOTHING the
+    # live process still depends on (the conf it reads, the proxy it uses).
+    assert r.stop(timeout=0.05) is False
+    assert proc.terminate_calls == 1 and proc.kill_calls == 1
+    assert temp_conf.exists()
+    assert r.temp_conf == temp_conf
+    assert fwd.stopped is False and r._forwarder is fwd
+    assert r._bgloop is bgloop and bgloop.is_alive
+
+    # The handle stays usable: a retry after the process finally exits cleans up.
+    proc.die()
+    assert r.stop(timeout=0.05) is True
+    assert not temp_conf.exists()
+    assert fwd.stopped is True
+    assert r._forwarder is None and r._bgloop is None
+    assert r.stop() is True  # idempotent
+
+
+def test_kill_does_not_tear_down_proxy_while_chrome_survives(tmp_path):
+    proc = StubbornPopen()
+    bgloop = persistent._BackgroundLoop()
+    fwd = _SpyForwarder()
+    r = persistent.LaunchResult(
+        process=proc, cdp_port=9222, profile_path=tmp_path / "p.conf",
+        user_data_dir=tmp_path / "ud", forwarder=fwd, bgloop=bgloop,
+    )
+    r.kill()
+    assert fwd.stopped is False and r._bgloop is bgloop
+    proc.die()
+    assert r.stop(timeout=0.05) is True
+    assert fwd.stopped is True

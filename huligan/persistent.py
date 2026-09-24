@@ -32,7 +32,7 @@ Example::
     )
     print(session.pid, session.cdp_url)
     ...
-    session.stop()   # terminates Chrome + tears down the forwarder + loop
+    ok = session.stop()   # True once Chrome exited + forwarder/loop torn down
 """
 
 from __future__ import annotations
@@ -175,13 +175,27 @@ class LaunchResult:
         return self.process.wait(timeout) if self.process else None
 
     def terminate(self) -> None:
-        """Terminate Chrome AND tear down the forwarder/loop (full cleanup)."""
+        """Terminate Chrome AND tear down the forwarder/loop (full cleanup).
+
+        Popen-compatible (returns ``None``). Check :meth:`poll` afterwards, or
+        call :meth:`stop` directly to get the success flag.
+        """
         self.stop()
 
-    def kill(self) -> None:
+    def kill(self, timeout: float = 5.0) -> None:
+        """Kill Chrome; tear down the proxy/conf only once it has really exited."""
         if self.process and self.process.poll() is None:
-            self.process.kill()
-        self._teardown_proxy()
+            try:
+                self.process.kill()
+            except Exception as e:
+                log.warning(f"Error killing Chrome: {e}")
+        if self._wait_exited(timeout):
+            self._cleanup_after_exit(timeout)
+        else:
+            log.error(
+                f"Chrome (PID {self.pid}) still running after kill(); keeping its "
+                f".conf and proxy forwarder alive"
+            )
 
     # --- session lifecycle ----------------------------------------------
     @property
@@ -192,26 +206,65 @@ class LaunchResult:
     def cdp_url(self) -> str:
         return f"http://127.0.0.1:{self._cdp_port}"
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0) -> bool:
         """Terminate Chrome, then stop the forwarder and background loop.
 
-        Idempotent and non-blocking beyond ``timeout``. Safe to call from a GUI
-        thread.
+        Returns ``True`` once Chrome is confirmed gone (``poll()`` reports an
+        exit code) and everything it depended on has been torn down. Idempotent:
+        later calls return ``True`` immediately.
+
+        Returns ``False`` if Chrome is STILL RUNNING after ``terminate()`` +
+        ``timeout`` and ``kill()`` + ``timeout``. In that case nothing else is
+        touched: the temp ``.conf`` is kept (deleting it would make the live
+        browser fall back to its REAL fingerprint values) and the proxy
+        forwarder stays up (tearing it down would break or unmask its traffic).
+        The handle remains usable, so the caller can retry ``stop()`` later and
+        must not treat the profile as closed.
+
+        Bounded by roughly ``2 * timeout`` plus the forwarder teardown. Safe to
+        call from a GUI thread.
         """
         if self._stopped:
-            return
-        self._stopped = True
+            return True
 
-        # 1. Terminate Chrome.
-        if self.process and self.process.poll() is None:
+        # 1. Terminate Chrome, escalating to kill, and CONFIRM it exited.
+        if self.process is not None and self.process.poll() is None:
             try:
                 self.process.terminate()
-                try:
-                    self.process.wait(timeout)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
             except Exception as e:
                 log.warning(f"Error terminating Chrome: {e}")
+            if not self._wait_exited(timeout):
+                try:
+                    self.process.kill()
+                except Exception as e:
+                    log.warning(f"Error killing Chrome: {e}")
+                if not self._wait_exited(timeout):
+                    log.error(
+                        f"Chrome (PID {self.pid}) did not exit after terminate+kill; "
+                        f"keeping its .conf and proxy forwarder so it cannot fall "
+                        f"back to the real fingerprint. Retry stop() later."
+                    )
+                    return False
+
+        # 2-4. Chrome is gone: release what it depended on.
+        self._cleanup_after_exit(timeout)
+        return True
+
+    def _wait_exited(self, timeout: float) -> bool:
+        """True once the process has an exit code (waits up to ``timeout``)."""
+        if self.process is None:
+            return True
+        try:
+            self.process.wait(timeout)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception as e:
+            log.debug(f"wait() error (ignored): {e}")
+        return self.process.poll() is not None
+
+    def _cleanup_after_exit(self, timeout: float = 5.0) -> None:
+        """Tear down forwarder/loop, temp conf and log handle. Chrome must be gone."""
+        self._stopped = True
 
         # 2. Tear down forwarder + loop.
         self._teardown_proxy(timeout=timeout)
@@ -251,7 +304,8 @@ class LaunchResult:
         return self
 
     def __exit__(self, *exc) -> None:
-        self.stop()
+        if not self.stop():
+            log.error(f"LaunchResult: Chrome (PID {self.pid}) survived stop()")
 
     def __repr__(self) -> str:
         return (

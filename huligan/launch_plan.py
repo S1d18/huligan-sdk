@@ -324,6 +324,13 @@ def resolve_conf_language(
     return explicit or conf_lang
 
 
+def conf_geolocation_is_manual(profile_path: Union[str, Path, None]) -> bool:
+    """True when the .conf pins its own position (``geolocation_mode=manual``),
+    so GeoIP-derived latitude/longitude must not overwrite it."""
+    mode = (read_conf_value(profile_path, "geolocation_mode") or "").strip().lower()
+    return mode == "manual"
+
+
 def find_free_port() -> int:
     """Bind to port 0 on loopback and return the OS-assigned free TCP port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

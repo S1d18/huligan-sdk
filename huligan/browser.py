@@ -45,6 +45,7 @@ from .geoip import GeoIPManager, GeoIPResult
 from .launch_plan import (
     build_launch_plan,
     cdp_mode_from_conf,
+    conf_geolocation_is_manual,
     find_free_port,
     resolve_conf_language,
     update_conf_keys,
@@ -514,7 +515,8 @@ class Browser:
             updates["languages"] = language
             updates["language_mode"] = "manual" if self._language_effective else "auto"
 
-        if self._geo:
+        # Keep a manual position from the profile; GeoIP fills auto only.
+        if self._geo and not conf_geolocation_is_manual(self._profile_path):
             updates["geolocation_latitude"] = str(self._geo.latitude)
             updates["geolocation_longitude"] = str(self._geo.longitude)
             updates["geolocation_accuracy"] = str(int(self._geo.accuracy))

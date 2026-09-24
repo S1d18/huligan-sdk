@@ -55,6 +55,7 @@ from .geoip import _resolve_geo
 from .launch_plan import (
     build_launch_plan,
     cdp_mode_from_conf,
+    conf_geolocation_is_manual,
     find_free_port,
     read_conf_value,
     resolve_conf_language,
@@ -432,7 +433,9 @@ def launch_persistent(
         if lang:
             updates["languages"] = lang
             updates["language_mode"] = "manual" if language else "auto"
-        if geo:
+        # A manual position in the profile is the user's choice; GeoIP only
+        # fills geolocation for auto profiles.
+        if geo and not conf_geolocation_is_manual(profile_path):
             updates["geolocation_latitude"] = str(geo.latitude)
             updates["geolocation_longitude"] = str(geo.longitude)
             updates["geolocation_accuracy"] = str(int(geo.accuracy))

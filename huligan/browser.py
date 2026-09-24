@@ -46,6 +46,7 @@ from .launch_plan import (
     build_launch_plan,
     cdp_mode_from_conf,
     find_free_port,
+    resolve_conf_language,
     update_conf_keys,
 )
 from .proxy import (
@@ -87,7 +88,9 @@ class Browser:
             profile_path: Path to existing .conf file (auto-generate if None)
             fingerprint: Dict of fingerprint params for FingerprintGenerator.generate()
             timezone: Override timezone (otherwise from GeoIP)
-            language: Override language (otherwise from GeoIP)
+            language: Override language (otherwise the .conf's own ``languages``
+                when it is ``language_mode=manual``, else GeoIP). Must agree
+                with a manual conf value or ``start()`` raises ValueError.
             cdp_port: CDP remote debugging port (auto-assign if None)
             headless: Run in headless mode
             user_data_dir: Chrome user data directory (temp dir if None)
@@ -101,6 +104,7 @@ class Browser:
         self._humanize = humanize
         self._timezone_override = timezone
         self._language_override = language
+        self._language_effective: Optional[str] = language
         self._cdp_port_input = cdp_port
         self._headless = headless
         self._user_data_dir_input = user_data_dir
@@ -167,6 +171,14 @@ class Browser:
             self._temp_profile.write_text(self._profile.to_conf(), encoding="utf-8")
             self._profile_path = self._temp_profile
             log.info(f"Generated profile: {self._profile_path}")
+
+        # 3b. A manual language in the .conf binds like the language= kwarg
+        # (same rule as launch_persistent, LANG-01): it must reach --accept-lang
+        # or HTTP Accept-Language contradicts navigator.languages. Raises
+        # ValueError when the kwarg contradicts it.
+        self._language_effective = resolve_conf_language(
+            self._profile_path, self._language_override
+        )
 
         # 4. GeoIP lookup.
         # Resolution strategy:
@@ -252,7 +264,7 @@ class Browser:
 
         # 5. Update .conf with timezone/language
         timezone = self._timezone_override
-        language = self._language_override
+        language = self._language_effective
 
         if self._geo and not timezone:
             timezone = self._geo.timezone
@@ -500,7 +512,7 @@ class Browser:
             updates["timezone_mode"] = "manual" if self._timezone_override else "auto"
         if language:
             updates["languages"] = language
-            updates["language_mode"] = "manual" if self._language_override else "auto"
+            updates["language_mode"] = "manual" if self._language_effective else "auto"
 
         if self._geo:
             updates["geolocation_latitude"] = str(self._geo.latitude)

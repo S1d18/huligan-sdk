@@ -293,6 +293,37 @@ def read_conf_value(profile_path: Union[str, Path, None], key: str) -> Optional[
     return None
 
 
+def _language_tokens(value: str) -> list:
+    return [t.strip().lower() for t in value.split(",") if t.strip()]
+
+
+def resolve_conf_language(
+    profile_path: Union[str, Path, None], explicit: Optional[str]
+) -> Optional[str]:
+    """Effective launch language: the explicit argument, else the .conf's own
+    ``languages`` when it is in ``language_mode=manual``, else ``None`` (GeoIP).
+
+    ``navigator.languages`` and the V8 locale come from the .conf, but HTTP
+    Accept-Language only follows ``--accept-lang``. A manual conf language that
+    does not reach the command line therefore splits JS and HTTP (LANG-01).
+
+    Raises ``ValueError`` if ``explicit`` contradicts a manual conf value (token
+    lists compared case- and whitespace-insensitively): one of the two would be
+    ignored and the fingerprint would contradict itself.
+    """
+    conf_lang: Optional[str] = None
+    mode = (read_conf_value(profile_path, "language_mode") or "").strip().lower()
+    if mode == "manual":
+        conf_lang = (read_conf_value(profile_path, "languages") or "").strip() or None
+    if explicit and conf_lang and _language_tokens(explicit) != _language_tokens(conf_lang):
+        raise ValueError(
+            f"language={explicit!r} conflicts with the profile's manual "
+            f"languages={conf_lang!r} (language_mode=manual in {profile_path}). "
+            f"Drop the language argument or change the profile."
+        )
+    return explicit or conf_lang
+
+
 def find_free_port() -> int:
     """Bind to port 0 on loopback and return the OS-assigned free TCP port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

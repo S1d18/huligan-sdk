@@ -57,6 +57,7 @@ from .launch_plan import (
     cdp_mode_from_conf,
     find_free_port,
     read_conf_value,
+    resolve_conf_language,
     update_conf_keys,
 )
 from .proxy import (
@@ -352,7 +353,10 @@ def launch_persistent(
             cleanup). A GUI should always pass an explicit per-profile dir.
         url: Optional start URL.
         timezone: Force timezone (else GeoIP). Pass when the GUI mode is manual.
-        language: Force Accept-Language (else GeoIP). Pass when mode is manual.
+        language: Force Accept-Language. When omitted, a .conf in
+            ``language_mode=manual`` supplies its own ``languages``; otherwise
+            GeoIP decides. Raises ``ValueError`` if it contradicts a manual
+            conf value.
         chrome_path: Explicit chrome path (auto-detect if ``None``).
         headless: ``--headless=new``.
         extra_args: Extra Chrome flags.
@@ -400,6 +404,10 @@ def launch_persistent(
     # already pinned in the .conf always wins over any probed exit IP (so we skip
     # the exit-IP probe entirely when it is present).
     existing_webrtc = read_conf_value(profile_path, "webrtc_local_ipv4") or ""
+    # A manual language in the .conf is as binding as the language= argument:
+    # it must reach --accept-lang, or HTTP Accept-Language contradicts
+    # navigator.languages (LANG-01). Raises ValueError on a conflict.
+    language = resolve_conf_language(profile_path, language)
     resolved = _resolve_geo(
         proxy_info,
         timezone=timezone,

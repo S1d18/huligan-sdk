@@ -243,6 +243,7 @@ def test_find_chrome_uses_channel_cache_hit(cache_dir, monkeypatch):
     vdir = cache_dir / version
     vdir.mkdir(parents=True)
     (vdir / "chrome.exe").write_text("x")
+    (vdir.parent / f"{vdir.name}.ok").write_text(vdir.name)
 
     monkeypatch.setattr(installer, "resolve_launch_target", lambda: (version, "sha"))
     resolved = chrome_mod.find_chrome()
@@ -259,6 +260,7 @@ def test_find_chrome_pinned_ignores_manifest(cache_dir, monkeypatch):
     vdir = cache_dir / CHROME_VERSION
     vdir.mkdir(parents=True)
     (vdir / "chrome.exe").write_text("x")
+    (vdir.parent / f"{vdir.name}.ok").write_text(vdir.name)
 
     _no_network(monkeypatch)  # pinned must not resolve via manifest
     resolved = chrome_mod.find_chrome()
@@ -355,6 +357,7 @@ def test_find_chrome_degrades_to_pinned_on_incompatible(cache_dir, monkeypatch):
     vdir = cache_dir / CHROME_VERSION
     vdir.mkdir(parents=True)
     (vdir / "chrome.exe").write_text("x")
+    (vdir.parent / f"{vdir.name}.ok").write_text(vdir.name)
 
     def incompatible():
         raise IncompatibleBuildError("needs newer schema")
@@ -363,3 +366,37 @@ def test_find_chrome_degrades_to_pinned_on_incompatible(cache_dir, monkeypatch):
     # must not raise — degrades to the pinned cached build
     resolved = chrome_mod.find_chrome()
     assert resolved == (vdir / "chrome.exe").resolve()
+
+
+# --- SYS-04: never resolve a vanilla / half-extracted Chrome ---------------
+
+
+def test_find_chrome_ignores_cwd_and_path(cache_dir, monkeypatch, tmp_path):
+    from huligan import chrome as chrome_mod
+
+    monkeypatch.setenv("HULIGAN_CHROME_CHANNEL", "pinned")
+    monkeypatch.delenv("HULIGAN_CHROME", raising=False)
+    stock = tmp_path / "stock"
+    stock.mkdir()
+    (stock / "chrome.exe").write_text("stock")
+    monkeypatch.chdir(stock)                       # ./chrome.exe is stock
+    monkeypatch.setenv("PATH", str(stock))         # so is chrome on PATH
+    _no_network(monkeypatch)
+
+    with pytest.raises(FileNotFoundError):
+        chrome_mod.find_chrome(auto_install=False)
+
+
+def test_find_chrome_rejects_cache_without_ok_marker(cache_dir, monkeypatch):
+    from huligan import chrome as chrome_mod
+
+    monkeypatch.setenv("HULIGAN_CHROME_CHANNEL", "pinned")
+    monkeypatch.delenv("HULIGAN_CHROME", raising=False)
+    monkeypatch.chdir(cache_dir)
+    vdir = cache_dir / CHROME_VERSION
+    vdir.mkdir(parents=True)
+    (vdir / "chrome.exe").write_text("x")          # interrupted extraction: no .ok
+    _no_network(monkeypatch)
+
+    with pytest.raises(FileNotFoundError):
+        chrome_mod.find_chrome(auto_install=False)

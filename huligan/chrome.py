@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -18,11 +17,15 @@ def find_chrome(
     Search order:
         1. ``explicit_path`` argument
         2. ``$HULIGAN_CHROME`` environment variable
-        3. ``./chrome.exe`` in the current working directory
-        4. Sibling of the ``huligan`` package (release-bundle layout)
-        5. ``~/.huligan/chrome/{version}/chrome.exe`` (auto-installer cache)
-        6. ``chrome``/``chrome.exe`` on the system PATH
-        7. If ``auto_install`` is True, downloads from the public mirror
+        3. Sibling of the ``huligan`` package (release-bundle layout)
+        4. ``~/.huligan/chrome/{version}/chrome.exe`` (auto-installer cache),
+           only when its ``{version}.ok`` marker says extraction completed
+        5. If ``auto_install`` is True, downloads from the public mirror
+
+    Deliberately NOT searched: ``./chrome.exe`` in the CWD and ``chrome`` on
+    ``PATH``. Both silently resolved to a stock, unpatched Chrome - the worst
+    possible outcome for an antidetect launch (audit SYS-04). Pass
+    ``explicit_path`` / ``$HULIGAN_CHROME`` to use a custom binary on purpose.
 
     Raises:
         FileNotFoundError: if Chrome cannot be found and ``auto_install`` is False.
@@ -39,10 +42,6 @@ def find_chrome(
         if p.is_file():
             return p.resolve()
 
-    cwd_chrome = Path("chrome.exe")
-    if cwd_chrome.is_file():
-        return cwd_chrome.resolve()
-
     package_dir = Path(__file__).parent
     for candidate in (
         package_dir.parent / "chrome.exe",
@@ -51,7 +50,9 @@ def find_chrome(
         if candidate.is_file():
             return candidate.resolve()
 
-    from .installer import ensure_chrome, resolve_launch_target, IncompatibleBuildError, _cache_root
+    from .installer import (
+        ensure_chrome, resolve_launch_target, IncompatibleBuildError, _cache_root, is_installed,
+    )
     from .version import CHROME_VERSION
 
     # The launch target is HULIGAN_CHROME_CHANNEL (env) or the persisted CLI
@@ -70,13 +71,11 @@ def find_chrome(
     except Exception:
         target_version = CHROME_VERSION
 
-    cached = _cache_root() / target_version / "chrome.exe"
-    if cached.is_file():
-        return cached.resolve()
-
-    chrome_in_path = shutil.which("chrome") or shutil.which("chrome.exe")
-    if chrome_in_path:
-        return Path(chrome_in_path).resolve()
+    # is_installed() also requires the .ok marker: a bare chrome.exe is what an
+    # interrupted extraction leaves behind, and a half-extracted build launches
+    # (or crashes) without its .pak/.dat files.
+    if is_installed(target_version):
+        return (_cache_root() / target_version / "chrome.exe").resolve()
 
     if auto_install:
         return ensure_chrome(target_version).resolve()
@@ -85,6 +84,5 @@ def find_chrome(
         "Huligan Chrome not found. Either:\n"
         f"  - pass chrome_path= to Browser()\n"
         f"  - set {env_var} environment variable\n"
-        f"  - place chrome.exe in the current directory\n"
         f"  - call huligan.installer.ensure_chrome() to download it"
     )

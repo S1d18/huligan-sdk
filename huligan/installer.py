@@ -556,8 +556,8 @@ def ensure_binary(
 
         options.binary_location = huligan.ensure_binary()
 
-    Always resolves the *patched* build. Unlike :func:`huligan.find_chrome`, it
-    never falls back to a vanilla system Chrome found on ``PATH`` - so an
+    Always resolves the *patched* build (as does :func:`huligan.find_chrome`,
+    which never falls back to a vanilla Chrome from ``PATH`` or the CWD) - so an
     integration whose contract is "the patched binary" gets exactly that.
     """
     return ensure_chrome(version, progress_callback, channel=channel)

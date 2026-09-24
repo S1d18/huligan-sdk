@@ -7,6 +7,10 @@ SDK downloads and caches it locally; subsequent runs hit the cache.
 Cache layout:
     ~/.huligan/chrome/{version}/chrome.exe   extracted browser
     ~/.huligan/chrome/{version}.ok           sentinel marking a successful install
+                                             (JSON with the verified sha256; older
+                                             SDKs wrote the bare version string)
+    ~/.huligan/chrome/{version}.lock         inter-process install lock
+    ~/.huligan/chrome/{version}.tmp-{pid}    staging dir while extracting
 
 Environment overrides:
     HULIGAN_CHROME=path           explicit binary, skips download
@@ -28,6 +32,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -482,6 +487,93 @@ def _flatten_top_level(target_dir: Path) -> None:
         inner.rmdir()
 
 
+def _unlink_quiet(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _write_sentinel(sentinel: Path, version: str, sha256: str) -> None:
+    """Atomically write the ``{version}.ok`` marker, recording the verified sha256.
+
+    Format: JSON ``{"version": ..., "sha256": ...}``. Older SDKs wrote the bare
+    version string; :func:`is_installed` only checks existence, so both count.
+    """
+    tmp = sentinel.with_name(f"{sentinel.name}.tmp-{os.getpid()}")
+    tmp.write_text(json.dumps({"version": version, "sha256": sha256}), encoding="utf-8")
+    os.replace(tmp, sentinel)
+
+
+def _installed_sha256(version: str) -> Optional[str]:
+    """sha256 recorded in the ``.ok`` sentinel, or ``None`` (absent / legacy)."""
+    try:
+        _root, _dir, sentinel = _version_paths(version)
+        data = json.loads(sentinel.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    if isinstance(data, dict) and data.get("sha256"):
+        return str(data["sha256"])
+    return None
+
+
+@contextmanager
+def _install_lock(root: Path, version: str, timeout: float = 3600.0, poll: float = 0.5):
+    """Exclusive inter-process lock on ``{root}/{version}.lock``.
+
+    Uses an OS byte-range / flock lock on an open handle, so the OS releases it
+    if the holder dies: a crashed installer never leaves a stale lock behind.
+    The lock file itself is left in place (deleting it would race other
+    waiters). Raises ``TimeoutError`` after ``timeout`` seconds.
+    """
+    validate_version(version)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / f"{version}.lock"
+    fh = open(lock_path, "a+b")
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                _try_lock(fh)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Another process is installing Chrome {version} "
+                        f"(lock {lock_path} held for more than {timeout:.0f}s)"
+                    )
+                time.sleep(poll)
+        try:
+            yield
+        finally:
+            _unlock(fh)
+    finally:
+        fh.close()
+
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _try_lock(fh) -> None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock(fh) -> None:
+        fh.seek(0)
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    import fcntl
+
+    def _try_lock(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def ensure_chrome(
     version: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
@@ -530,72 +622,98 @@ def ensure_chrome(
             f"published version, or upgrade the SDK."
         )
 
-    repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
-    asset_name = ASSET_NAME_TEMPLATE.format(version=version)
-    token = os.environ.get("HULIGAN_GH_TOKEN")
+    # One installer per version at a time, across processes (a GUI and a CLI,
+    # or several SDK processes on a farm). Whoever waited re-checks the cache:
+    # the first holder has usually finished the job.
+    with _install_lock(root, version):
+        if chrome_exe.is_file() and sentinel.exists():
+            return chrome_exe
+        # Not installed (or damaged). A stale sentinel must not survive into a
+        # repair that might be interrupted.
+        _unlink_quiet(sentinel)
+        # Leftovers of a crashed installer for this version (we hold the lock,
+        # so nobody else is using them).
+        for leftover in root.glob(f"{version}.tmp-*"):
+            shutil.rmtree(leftover, ignore_errors=True)
 
-    if token:
-        try:
-            url, _ = _resolve_asset(repo, version, asset_name, token)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                raise RuntimeError(
-                    f"GitHub rejected HULIGAN_GH_TOKEN (HTTP 401). "
-                    f"Re-issue it via `gh auth token` and re-export."
-                ) from exc
-            if exc.code == 403:
-                raise RuntimeError(
-                    f"GitHub denied access to {repo} (HTTP 403). "
-                    f"Check that the token has 'repo' scope and that the "
-                    f"account can see this repository."
-                ) from exc
-            if exc.code == 404:
-                raise RuntimeError(
-                    f"Release v{version} not found in {repo} (HTTP 404). "
-                    f"Verify the version number and HULIGAN_RELEASES_REPO."
-                ) from exc
-            raise
-    else:
-        url = _build_browser_url(version)
+        repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
+        asset_name = ASSET_NAME_TEMPLATE.format(version=version)
+        token = os.environ.get("HULIGAN_GH_TOKEN")
 
-    print(f"[huligan] Chrome {version} not in cache, downloading...")
-    print(f"[huligan] Source: {url}")
+        if token:
+            try:
+                url, _ = _resolve_asset(repo, version, asset_name, token)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401:
+                    raise RuntimeError(
+                        f"GitHub rejected HULIGAN_GH_TOKEN (HTTP 401). "
+                        f"Re-issue it via `gh auth token` and re-export."
+                    ) from exc
+                if exc.code == 403:
+                    raise RuntimeError(
+                        f"GitHub denied access to {repo} (HTTP 403). "
+                        f"Check that the token has 'repo' scope and that the "
+                        f"account can see this repository."
+                    ) from exc
+                if exc.code == 404:
+                    raise RuntimeError(
+                        f"Release v{version} not found in {repo} (HTTP 404). "
+                        f"Verify the version number and HULIGAN_RELEASES_REPO."
+                    ) from exc
+                raise
+        else:
+            url = _build_browser_url(version)
 
-    with tempfile.TemporaryDirectory() as tmp_str:
-        tmp = Path(tmp_str)
-        zip_path = tmp / asset_name
+        print(f"[huligan] Chrome {version} not in cache, downloading...")
+        print(f"[huligan] Source: {url}")
 
-        try:
-            _download(url, zip_path, token=token, progress_callback=progress_callback)
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403, 404) and not token:
-                raise RuntimeError(
-                    f"Could not download {url} (HTTP {exc.code}).\n"
-                    f"If the mirror is still private, set HULIGAN_GH_TOKEN "
-                    f"to a GitHub token with 'repo' scope and retry."
-                ) from exc
-            raise
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            zip_path = tmp / asset_name
 
-        _verify_sha256(zip_path, expected_sha)
+            try:
+                _download(url, zip_path, token=token, progress_callback=progress_callback)
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403, 404) and not token:
+                    raise RuntimeError(
+                        f"Could not download {url} (HTTP {exc.code}).\n"
+                        f"If the mirror is still private, set HULIGAN_GH_TOKEN "
+                        f"to a GitHub token with 'repo' scope and retry."
+                    ) from exc
+                raise
 
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
+            _verify_sha256(zip_path, expected_sha)
 
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(target_dir)
+            # Extract into a private staging dir next to the target (same volume,
+            # so the final os.replace is a rename). The live dir is only touched
+            # once a complete, checked tree exists.
+            staging = root / f"{version}.tmp-{os.getpid()}"
+            try:
+                if staging.exists():
+                    shutil.rmtree(staging)
+                staging.mkdir(parents=True)
+                with zipfile.ZipFile(zip_path) as zf:
+                    zf.extractall(staging)
+                _flatten_top_level(staging)
+                if not (staging / "chrome.exe").is_file():
+                    raise RuntimeError(
+                        f"chrome.exe not found after extraction of {asset_name}"
+                    )
 
-        _flatten_top_level(target_dir)
+                # The sentinel goes BEFORE the old tree: an interruption from here
+                # on must never leave "{version}.ok" next to a half-replaced dir.
+                _unlink_quiet(sentinel)
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
+                os.replace(staging, target_dir)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
 
-        if not chrome_exe.is_file():
-            raise RuntimeError(
-                f"chrome.exe not found after extraction at {target_dir}"
-            )
+            _write_sentinel(sentinel, version, expected_sha)
 
-        sentinel.write_text(version)
-
-    print(f"[huligan] Chrome {version} installed at {target_dir}")
-    return chrome_exe
+        print(f"[huligan] Chrome {version} installed at {target_dir}")
+        return chrome_exe
 
 
 def ensure_binary(

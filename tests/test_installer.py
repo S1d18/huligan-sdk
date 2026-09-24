@@ -454,3 +454,146 @@ def test_ensure_chrome_refuses_unknown_version_when_manifest_offline(cache_dir, 
         installer.ensure_chrome(version)
     assert downloads == []
     assert not installer.is_installed(version)
+
+
+# --- INST-CONC-01: locked, staged, atomic install --------------------------
+
+
+def _manifest_for(payload, version):
+    sha = hashlib.sha256(payload.read_bytes()).hexdigest()
+    return sha, {"latest": version, "versions": {version: {"win64": {"sha256": sha}}}}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_concurrent_installs_of_one_version_download_once(cache_dir, monkeypatch):
+    import threading
+
+    payload = _zip_with_chrome(cache_dir)
+    version = "151.0.7900.5"
+    _sha, manifest = _manifest_for(payload, version)
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    downloads = []
+
+    def slow_download(url, dest, token=None, progress_callback=None):
+        downloads.append(url)
+        time.sleep(0.5)        # hold the window open for the other installer
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload.read_bytes())
+    monkeypatch.setattr(installer, "_download", slow_download)
+
+    results, errors = [], []
+
+    def worker():
+        try:
+            results.append(installer.ensure_chrome(version))
+        except Exception as e:  # pragma: no cover - reported below
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert errors == []
+    assert len(results) == 3 and len(set(results)) == 1
+    assert len(downloads) == 1
+    assert installer.is_installed(version)
+    assert not list(cache_dir.glob(f"{version}.tmp-*"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_interrupted_repair_is_not_reported_installed(cache_dir, monkeypatch):
+    payload = _zip_with_chrome(cache_dir)
+    version = "151.0.7900.6"
+    _sha, manifest = _manifest_for(payload, version)
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+
+    def fake_download(url, dest, token=None, progress_callback=None):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload.read_bytes())
+    monkeypatch.setattr(installer, "_download", fake_download)
+
+    # A damaged install: the .ok survived but chrome.exe is gone -> repair.
+    vdir = cache_dir / version
+    vdir.mkdir()
+    (vdir / "old.dll").write_text("old")
+    (cache_dir / f"{version}.ok").write_text(version)
+
+    # The repair's extraction dies half-way, after chrome.exe hit the disk.
+    def crash_midway(self, path=None, members=None, pwd=None):
+        from pathlib import Path as _P
+        _P(path, "chrome.exe").write_bytes(b"half")
+        raise OSError("disk full")
+    monkeypatch.setattr(installer.zipfile.ZipFile, "extractall", crash_midway)
+
+    with pytest.raises(OSError, match="disk full"):
+        installer.ensure_chrome(version)
+    assert not installer.is_installed(version)
+    assert version not in installer.installed_versions()
+    assert not list(cache_dir.glob(f"{version}.tmp-*"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_repair_replaces_dir_atomically_and_records_sha(cache_dir, monkeypatch):
+    payload = _zip_with_chrome(cache_dir)
+    version = "151.0.7900.7"
+    sha, manifest = _manifest_for(payload, version)
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+
+    def fake_download(url, dest, token=None, progress_callback=None):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload.read_bytes())
+    monkeypatch.setattr(installer, "_download", fake_download)
+
+    vdir = cache_dir / version
+    vdir.mkdir()
+    (vdir / "stale.dll").write_text("old")          # no chrome.exe -> reinstall
+    path = installer.ensure_chrome(version)
+    assert path.read_bytes() == b"unverified-binary"
+    assert not (vdir / "stale.dll").exists()         # old tree fully replaced
+    assert sha in (cache_dir / f"{version}.ok").read_text()
+    assert installer._installed_sha256(version) == sha
+
+
+def test_legacy_ok_sentinel_still_counts_as_installed(cache_dir):
+    version = "150.0.7871.101"
+    (cache_dir / version).mkdir()
+    (cache_dir / version / "chrome.exe").write_text("x")
+    (cache_dir / f"{version}.ok").write_text(version)   # old format: version only
+    assert installer.is_installed(version)
+    assert installer.installed_versions() == [version]
+    assert installer._installed_sha256(version) is None
+
+
+def test_install_lock_is_exclusive_across_handles(cache_dir):
+    import threading
+
+    order = []
+    with installer._install_lock(cache_dir, "150.0.7871.101"):
+        def other():
+            with installer._install_lock(cache_dir, "150.0.7871.101", poll=0.05):
+                order.append("second")
+        t = threading.Thread(target=other)
+        t.start()
+        time.sleep(0.3)
+        order.append("first-release")
+    t.join(5)
+    assert order == ["first-release", "second"]
+
+
+def test_install_lock_times_out(cache_dir):
+    import threading
+
+    with installer._install_lock(cache_dir, "150.0.7871.101"):
+        errs = []
+
+        def other():
+            try:
+                with installer._install_lock(cache_dir, "150.0.7871.101", timeout=0.3, poll=0.05):
+                    pass
+            except TimeoutError as e:
+                errs.append(e)
+        t = threading.Thread(target=other)
+        t.start()
+        t.join(5)
+    assert errs

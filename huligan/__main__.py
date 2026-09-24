@@ -133,6 +133,12 @@ def _cmd_chrome_pin(args) -> int:
             print(f"No exact pin set (default {CHROME_VERSION}).")
         return 0
 
+    try:
+        installer.validate_version(args.version)
+    except ValueError as exc:
+        print(f"Cannot pin: {exc}", file=sys.stderr)
+        return 2
+
     cfg["channel"] = "pinned"
     cfg["pinned_version"] = args.version
     installer._save_config(cfg)

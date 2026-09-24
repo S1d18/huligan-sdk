@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -76,6 +77,45 @@ _KNOWN_SHA256 = {
     "151.0.7922.76": "46dce52701ad47d0e8b25ed44faa12cef7bcc093f04f39ff2cceefa278a2594b",
     "152.0.7977.65": "1176597f64cedb783f3680d77e3c71aa63f95eb3bbfbea4a91c36d1c8bc34299",
 }
+
+
+# A Chrome build version is exactly four dot-separated decimal numbers. It is
+# used as a directory / file name under the cache root, so anything else ("",
+# "..", "../x", an absolute path) must be rejected before it reaches the
+# filesystem (VER-PATH-01: remove_version('..') used to delete the cache root's
+# parent).
+_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def validate_version(version) -> str:
+    """Return ``version`` if it is a dotted four-part numeric build version.
+
+    Raises ``ValueError`` otherwise. Call before using a version in any path.
+    """
+    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
+        raise ValueError(
+            f"Invalid Chrome version {version!r}: expected four dot-separated "
+            f"numbers, e.g. {CHROME_VERSION}"
+        )
+    return version
+
+
+def _version_paths(version: str) -> Tuple[Path, Path, Path]:
+    """Validated ``(root, version_dir, sentinel)`` for ``version``.
+
+    Belt and braces on top of :func:`validate_version`: the resolved paths must
+    stay strictly inside the cache root.
+    """
+    validate_version(version)
+    root = _cache_root()
+    target_dir = root / version
+    sentinel = root / f"{version}.ok"
+    root_resolved = root.resolve()
+    for path in (target_dir, sentinel):
+        resolved = path.resolve()
+        if resolved == root_resolved or not resolved.is_relative_to(root_resolved):
+            raise ValueError(f"Chrome version {version!r} escapes the cache root {root}")
+    return root, target_dir, sentinel
 
 
 def _cache_root() -> Path:
@@ -155,7 +195,8 @@ def installed_versions() -> list:
         return []
     found = []
     for entry in root.iterdir():
-        if (entry.is_dir()
+        if (_VERSION_RE.fullmatch(entry.name)
+                and entry.is_dir()
                 and (entry / "chrome.exe").is_file()
                 and (root / f"{entry.name}.ok").exists()):
             found.append(entry.name)
@@ -163,16 +204,18 @@ def installed_versions() -> list:
 
 
 def remove_version(version: str) -> bool:
-    """Delete a cached Chrome version (dir + sentinel). Returns True if anything went."""
-    root = _cache_root()
+    """Delete a cached Chrome version (dir + sentinel). Returns True if anything went.
+
+    Raises ``ValueError`` for anything that is not a four-part numeric version.
+    """
+    _root, target, sentinel = _version_paths(version)
     removed = False
-    target = root / version
-    if target.exists():
-        shutil.rmtree(target)
-        removed = True
-    sentinel = root / f"{version}.ok"
+    # Sentinel first: an interrupted removal must not look like an install.
     if sentinel.exists():
         sentinel.unlink()
+        removed = True
+    if target.exists():
+        shutil.rmtree(target)
         removed = True
     return removed
 
@@ -293,6 +336,7 @@ def _resolve_target(
     gated on ``min_conf_schema`` before we agree to download them.
     """
     if version is not None:
+        validate_version(version)
         if version in _KNOWN_SHA256:
             # Baked-in build: offline, and known-compatible with this SDK.
             return version, _KNOWN_SHA256[version]
@@ -309,7 +353,7 @@ def _resolve_target(
         return CHROME_VERSION, sha
 
     manifest = _fetch_manifest()
-    resolved = _channel_version(manifest, channel)
+    resolved = validate_version(_channel_version(manifest, channel))
     _check_conf_compat(resolved, manifest)
     sha = _sha_from_manifest(resolved, manifest)
     return resolved, sha
@@ -466,10 +510,8 @@ def ensure_chrome(
 
     version, expected_sha = _resolve_target(version, channel)
 
-    root = _cache_root()
-    target_dir = root / version
+    root, target_dir, sentinel = _version_paths(version)
     chrome_exe = target_dir / "chrome.exe"
-    sentinel = root / f"{version}.ok"
 
     if chrome_exe.is_file() and sentinel.exists():
         return chrome_exe
@@ -564,9 +606,16 @@ def ensure_binary(
 
 
 def is_installed(version: str = CHROME_VERSION) -> bool:
-    """True if ``version`` is already extracted and marked OK in the cache."""
-    root = _cache_root()
-    return (root / version / "chrome.exe").is_file() and (root / f"{version}.ok").exists()
+    """True if ``version`` is already extracted and marked OK in the cache.
+
+    An invalid version string (not four dot-separated numbers) is never
+    installed: returns ``False`` without touching the filesystem.
+    """
+    try:
+        _root, target_dir, sentinel = _version_paths(version)
+    except ValueError:
+        return False
+    return (target_dir / "chrome.exe").is_file() and sentinel.exists()
 
 
 def latest_version(

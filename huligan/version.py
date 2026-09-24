@@ -10,6 +10,14 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 3 (2026-09-24): pre-release audit P1 fixes, same Chrome 152.0.7977.65.
+#   pyproject 1.6.1 -> 1.6.2. LaunchResult.stop() now returns bool and never
+#   frees the .conf/forwarder of a Chrome that is still alive (PROC-01); partial
+#   launches roll back (LAUNCH-01); no --remote-allow-origins=* (SEC-07: foreign
+#   Origin CDP 101 -> 403, Playwright unaffected); serve Origin guard exact;
+#   installer refuses unknown sha, validates versions as paths, locks + stages
+#   installs; manual language/geolocation in the .conf are honoured.
+#
 # Build 2 (2026-09-24): security/leak fixes from the pre-release audit, same
 #   Chrome 152.0.7977.65. pyproject 1.6.0 -> 1.6.1.
 #   1. WebRTC: --webrtc-ip-handling-policy replaces the content_shell-only
@@ -91,7 +99,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 2
+BUILD_NUMBER = 3
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "152.0.7977.65"

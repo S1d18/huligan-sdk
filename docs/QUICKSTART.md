@@ -218,7 +218,7 @@ C:\huligan\chrome.exe --no-sandbox ^
   --user-data-dir=C:\huligan\data ^
   --proxy-server=socks5://127.0.0.1:1080 ^
   --host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1" ^
-  --force-webrtc-ip-handling-policy=disable_non_proxied_udp ^
+  --webrtc-ip-handling-policy=disable_non_proxied_udp ^
   --lang=ru
 ```
 

@@ -74,7 +74,7 @@ The SDK sets these Chrome flags automatically when a proxy is configured:
 ```
 --proxy-server=socks5://127.0.0.1:<RANDOM_PORT>
 --host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE <proxy_ip>
---force-webrtc-ip-handling-policy=disable_non_proxied_udp
+--webrtc-ip-handling-policy=disable_non_proxied_udp
 --lang=<language_from_geoip>
 ```
 
@@ -86,7 +86,7 @@ Timezone is applied at **C++ level** by the `16_timezone.py` Chromium patch — 
 
 ## WebRTC Leak Protection
 
-The `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` flag prevents WebRTC from revealing the real IP. Combined with DNS-through-proxy, there are no IP leaks.
+The `--webrtc-ip-handling-policy=disable_non_proxied_udp` flag prevents WebRTC from revealing the real IP. Combined with DNS-through-proxy, there are no IP leaks.
 
 ## Manual ProxyForwarder (without Browser class)
 

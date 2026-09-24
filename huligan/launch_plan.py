@@ -72,14 +72,14 @@ def build_launch_plan(
         proxy_info: Parsed proxy dict (``host``/``port``/``type``). Used for the
             direct ``--proxy-server`` (when there is no forwarder) and always for
             the leak-prevention ``host-resolver-rules`` / WebRTC flags.
-        proxy_udp_relay: True when the local forwarder has a WORKING UDP relay
-            (its upstream accepted UDP ASSOCIATE). Only then is WebRTC's UDP
-            actually proxied, so only then is it safe to let it out. Defaults to
-            False: block.
+        proxy_udp_relay: Ignored (kept for API compatibility). It used to lift the
+            WebRTC UDP block when the forwarder had a UDP relay, but Chrome has
+            no SOCKS5 UDP ASSOCIATE, so its WebRTC UDP never reaches the relay
+            and lifting the block leaked the real IP. The block is now always on
+            behind a proxy.
         webrtc_spoof_ip: NOTE — inert unless patch 11a_webrtc_spoof is in the
             build, and it is NOT in SHIPPED_PATCHES. Kept for builds that
-            deliberately include it. It no longer decides the UDP-block flag;
-            that is proxy_udp_relay's job.
+            deliberately include it. It does not decide the UDP-block flag.
             When the patch IS present, the binary rewrites WebRTC ICE
             candidate IPs at the source, so the blanket
             ``disable_non_proxied_udp`` flag is omitted. When falsy (and a proxy
@@ -121,21 +121,22 @@ def build_launch_plan(
         args.append(
             f"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE {proxy_ip}"
         )
-        # Let WebRTC's UDP out ONLY when the forwarder can actually carry it.
+        # Block WebRTC UDP that does not go through the proxy - ALWAYS.
         #
-        # This used to key off webrtc_spoof_ip, on the theory that the patched
-        # binary rewrites candidate IPs in port.cc. That patch (11a_webrtc_spoof)
-        # is not in SHIPPED_PATCHES, so the premise was false and the setting
-        # dead. Measured on the 152 build through a real proxy: flag on and flag
-        # off produced identical ICE output (one mDNS host candidate, no srflx),
-        # because a TCP-only forwarder gives STUN nowhere to go either way.
+        # The flag name matters. This used to be --force-webrtc-ip-handling-policy,
+        # a content_shell-only switch (content/shell/browser/shell.cc) that real
+        # Chrome ignores: measured on 154.0.8037.58 behind SOCKS5 it still emitted
+        # a direct srflx candidate carrying the machine's real IP (audit NET-03).
+        # --webrtc-ip-handling-policy is the chrome switch that
+        # ChromeCommandLinePrefStore maps onto the webrtc.ip_handling_policy pref
+        # (chrome/browser/prefs/chrome_command_line_pref_store.cc), which is what
+        # renderer_preferences_util.cc actually reads. Same A/B: 0 candidates.
         #
-        # With a UDP-capable upstream the relay is real, STUN reaches a server,
-        # and the srflx candidate carries the proxy exit IP — the shape a normal
-        # Chrome behind NAT has. Without one we block, which is what was
-        # happening anyway, now on purpose.
-        if not proxy_udp_relay:
-            args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+        # It is also no longer lifted when the forwarder has a UDP relay: Chrome
+        # has no SOCKS5 UDP ASSOCIATE (nothing in net/ or p2p/), so its WebRTC UDP
+        # never enters the forwarder - lifting the block just sent STUN direct.
+        # proxy_udp_relay is kept for API compatibility only.
+        args.append("--webrtc-ip-handling-policy=disable_non_proxied_udp")
         args.append("--enforce-webrtc-ip-permission-check")
 
     # Features to disable, emitted as a SINGLE --disable-features switch.

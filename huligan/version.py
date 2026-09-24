@@ -10,6 +10,16 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 2 (2026-09-24): security/leak fixes from the pre-release audit, same
+#   Chrome 152.0.7977.65. pyproject 1.6.0 -> 1.6.1.
+#   1. WebRTC: --webrtc-ip-handling-policy replaces the content_shell-only
+#      --force-... switch, which real Chrome ignored (direct STUN srflx leaked the
+#      real IP behind SOCKS5; A/B-verified on 154.0.8037.58). Also no longer
+#      lifted for UDP-relay forwarders - Chrome has no SOCKS5 UDP ASSOCIATE.
+#   2. find_chrome no longer falls back to ./chrome.exe or PATH (stock Chrome),
+#      and requires the .ok marker for a cache hit.
+#   3. GeoIP keyed on the proxy EXIT IP instead of the gateway host.
+#
 # Build 1 (2026-08-30): Chrome 152.0.7977.65 major bump (151 -> 152). BUILD_NUMBER
 #   resets to 1 on the major. Three things beyond the version bump:
 #   1. NEW .conf KEY cpu_performance_tier (CONF_SCHEMA_VERSION 1 -> 2) behind
@@ -81,7 +91,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 1
+BUILD_NUMBER = 2
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "152.0.7977.65"

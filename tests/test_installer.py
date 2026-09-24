@@ -400,3 +400,57 @@ def test_find_chrome_rejects_cache_without_ok_marker(cache_dir, monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         chrome_mod.find_chrome(auto_install=False)
+
+
+# --- SEC-03: never extract an archive we cannot verify ---------------------
+
+
+def _zip_with_chrome(cache_dir):
+    payload = cache_dir / "build.zip"
+    with zipfile.ZipFile(payload, "w") as zf:
+        zf.writestr("chrome.exe", b"unverified-binary")
+    return payload
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_ensure_chrome_refuses_version_missing_from_manifest(cache_dir, monkeypatch):
+    payload = _zip_with_chrome(cache_dir)
+    version = "151.0.7900.3"
+    assert version not in installer._KNOWN_SHA256
+    manifest = {"latest": version, "versions": {}}   # no sha for this build
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    downloads = []
+
+    def fake_download(url, dest, token=None, progress_callback=None):
+        downloads.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload.read_bytes())
+    monkeypatch.setattr(installer, "_download", fake_download)
+
+    with pytest.raises(RuntimeError, match="sha256"):
+        installer.ensure_chrome(channel="latest")
+    assert downloads == []
+    assert not installer.is_installed(version)
+    assert not (cache_dir / version).exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="installer ships win64 only")
+def test_ensure_chrome_refuses_unknown_version_when_manifest_offline(cache_dir, monkeypatch):
+    payload = _zip_with_chrome(cache_dir)
+    version = "151.0.7900.4"
+
+    def offline(*a, **k):
+        raise urllib.error.URLError("offline")
+    monkeypatch.setattr(installer, "_fetch_manifest", offline)
+    downloads = []
+
+    def fake_download(url, dest, token=None, progress_callback=None):
+        downloads.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload.read_bytes())
+    monkeypatch.setattr(installer, "_download", fake_download)
+
+    with pytest.raises(RuntimeError, match="sha256"):
+        installer.ensure_chrome(version)
+    assert downloads == []
+    assert not installer.is_installed(version)

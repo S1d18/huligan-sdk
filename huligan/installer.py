@@ -498,6 +498,8 @@ def ensure_chrome(
 
     The expected sha256 comes from the manifest when the version is not baked
     into ``_KNOWN_SHA256`` — so a new monthly build no longer needs an SDK edit.
+    Without a known sha256 (manifest offline, or the version absent from it) the
+    install is refused with ``RuntimeError``; nothing is downloaded.
 
     Idempotent: a hot cache short-circuits in O(1). Pass ``progress_callback``
     (``(downloaded, total)``) to drive a GUI progress bar instead of the console.
@@ -515,6 +517,18 @@ def ensure_chrome(
 
     if chrome_exe.is_file() and sentinel.exists():
         return chrome_exe
+
+    # SEC-03: never download + extract a build we cannot verify. A version that
+    # is neither baked into _KNOWN_SHA256 nor listed with a sha256 in the
+    # release manifest (or the manifest is unreachable) is refused outright.
+    if not expected_sha:
+        raise RuntimeError(
+            f"Refusing to install Chrome {version}: no known sha256 for it. It is "
+            f"not baked into this SDK and the release manifest "
+            f"({os.environ.get('HULIGAN_RELEASES_REPO', DEFAULT_REPO)}) is "
+            f"unreachable or does not list it. Retry when online, pick a "
+            f"published version, or upgrade the SDK."
+        )
 
     repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
     asset_name = ASSET_NAME_TEMPLATE.format(version=version)
@@ -562,8 +576,7 @@ def ensure_chrome(
                 ) from exc
             raise
 
-        if expected_sha:
-            _verify_sha256(zip_path, expected_sha)
+        _verify_sha256(zip_path, expected_sha)
 
         if target_dir.exists():
             shutil.rmtree(target_dir)

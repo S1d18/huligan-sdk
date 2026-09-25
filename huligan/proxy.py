@@ -10,6 +10,9 @@ credentials.
 Supported upstream types:
   - SOCKS5 with username/password auth
   - HTTP CONNECT with Basic auth
+  - HTTPS CONNECT (``https://`` scheme): same as HTTP CONNECT, but the
+    connection to the proxy itself is TLS-wrapped (certificate + hostname
+    verified) BEFORE the Basic credentials are sent (NET-01)
 
 Usage:
     from huligan.proxy import ProxyForwarder, parse_proxy_string
@@ -25,11 +28,22 @@ import asyncio
 import base64
 import logging
 import socket
+import ssl
 import struct
 import time
 from typing import Optional
 
 log = logging.getLogger("huligan.proxy")
+
+
+def _proxy_ssl_context() -> ssl.SSLContext:
+    """TLS context for the hop to an ``https://`` upstream proxy.
+
+    System trust store, certificate and hostname verification on. A module
+    function (not inlined) so tests can substitute a context that trusts a
+    locally generated certificate.
+    """
+    return ssl.create_default_context()
 
 
 class ProxyForwarder:
@@ -406,9 +420,17 @@ class ProxyForwarder:
 
     async def _connect_http(self, target_host: str, target_port: int):
         """Connect to target through upstream HTTP CONNECT proxy with auth."""
-        reader, writer = await asyncio.open_connection(
-            self.upstream_host, self.upstream_port
-        )
+        if self.upstream_type == "https":
+            # NET-01: Basic credentials must never cross the wire in clear
+            # text. TLS to the proxy is established (and verified) first.
+            reader, writer = await asyncio.open_connection(
+                self.upstream_host, self.upstream_port,
+                ssl=_proxy_ssl_context(), server_hostname=self.upstream_host,
+            )
+        else:
+            reader, writer = await asyncio.open_connection(
+                self.upstream_host, self.upstream_port
+            )
         try:
             creds = base64.b64encode(
                 f"{self.upstream_user}:{self.upstream_pass}".encode()
@@ -509,7 +531,8 @@ def detect_exit_ip(proxy_info: dict, timeout: float = 4.0) -> Optional[str]:
         if upstream_type in ("socks5", "socks5h"):
             return _detect_via_socks5(host, port, user, password, timeout)
         if upstream_type in ("http", "https"):
-            return _detect_via_http_connect(host, port, user, password, timeout)
+            return _detect_via_http_connect(host, port, user, password, timeout,
+                                            tls=(upstream_type == "https"))
     except (OSError, socket.timeout, ValueError) as e:
         log.warning(f"detect_exit_ip failed via {upstream_type}://{host}:{port} — {e}")
         return None
@@ -620,9 +643,16 @@ def _detect_via_socks5(host: str, port: int, user: str, password: str,
 
 
 def _detect_via_http_connect(host: str, port: int, user: str, password: str,
-                              timeout: float) -> Optional[str]:
+                              timeout: float, tls: bool = False) -> Optional[str]:
     s = socket.create_connection((host, port), timeout=timeout)
     s.settimeout(timeout)
+    if tls:
+        # NET-01: wrap (and verify) before any credential is written.
+        try:
+            s = _proxy_ssl_context().wrap_socket(s, server_hostname=host)
+        except Exception:
+            s.close()
+            raise
     try:
         connect = f"CONNECT {_PROBE_HOST}:80 HTTP/1.1\r\nHost: {_PROBE_HOST}:80\r\n"
         if user:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -38,6 +39,8 @@ from typing import Callable, Optional, Tuple
 
 from .conf_spec import CONF_SCHEMA_VERSION
 from .version import CHROME_VERSION
+
+log = logging.getLogger("huligan.installer")
 
 
 class IncompatibleBuildError(RuntimeError):
@@ -71,6 +74,11 @@ DEFAULT_CHANNEL = "pinned"
 # manifest only changes when the operator publishes a build, so a day is ample
 # and keeps Browser() off the network on the hot path.
 _MANIFEST_TTL_SECONDS = 24 * 3600
+# When the network is down an expired cache is still served (offline degrade),
+# but not forever: past this age the stale copy is refused so a machine that
+# has been offline for weeks does not keep resolving channels from an ancient
+# manifest (and its sha256 / min_conf_schema) without anyone noticing.
+_MANIFEST_STALE_MAX_SECONDS = 14 * 24 * 3600
 _PLATFORM_KEY = "win64"
 
 # SHA256 of officially published archives. Verified before extraction.
@@ -130,9 +138,22 @@ def _cache_root() -> Path:
     return Path.home() / ".huligan" / "chrome"
 
 
-def _manifest_cache_path() -> Path:
-    """Where the release manifest is cached locally (under the cache root)."""
-    return _cache_root() / "manifest.json"
+def _releases_repo() -> str:
+    return os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
+
+
+def _manifest_cache_path(repo: Optional[str] = None) -> Path:
+    """Where the release manifest of ``repo`` is cached (under the cache root).
+
+    Keyed by repo: switching ``HULIGAN_RELEASES_REPO`` must not serve another
+    repo's manifest. The default repo keeps the historical ``manifest.json``.
+    """
+    repo = repo if repo is not None else _releases_repo()
+    if repo == DEFAULT_REPO:
+        return _cache_root() / "manifest.json"
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", repo).strip("._")[:60] or "repo"
+    digest = hashlib.sha256(repo.encode("utf-8")).hexdigest()[:10]
+    return _cache_root() / f"manifest-{slug}-{digest}.json"
 
 
 def _config_path() -> Path:
@@ -298,26 +319,28 @@ def _fetch_manifest(force: bool = False, timeout: float = 10.0) -> dict:
     A fresh cache (younger than ``_MANIFEST_TTL_SECONDS``) short-circuits with
     no network. On a cache miss/expiry we fetch from the releases repo; if that
     fails but a (stale) cache exists we return the stale copy so a network blip
-    never bricks resolution. Raises only when there is neither network nor any
-    cache to fall back on.
+    never bricks resolution — logged with its age, and only up to
+    ``_MANIFEST_STALE_MAX_SECONDS``. Raises when there is neither network nor a
+    usable cache to fall back on. The cache is per ``HULIGAN_RELEASES_REPO``.
     """
-    cache = _manifest_cache_path()
+    repo = _releases_repo()
+    cache = _manifest_cache_path(repo)
     cached_data = None
+    age = None
     if cache.is_file():
         try:
             cached_data = json.loads(cache.read_text(encoding="utf-8"))
         except Exception:
             cached_data = None
-
-    if not force and cached_data is not None:
         try:
             age = time.time() - cache.stat().st_mtime
         except OSError:
-            age = _MANIFEST_TTL_SECONDS + 1  # treat unstattable as expired
+            age = None  # unstattable: treat as expired, and too old to trust offline
+
+    if not force and cached_data is not None and age is not None:
         if age < _MANIFEST_TTL_SECONDS:
             return cached_data
 
-    repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
     token = os.environ.get("HULIGAN_GH_TOKEN")
     url = MANIFEST_URL_TEMPLATE.format(repo=repo)
     try:
@@ -326,9 +349,20 @@ def _fetch_manifest(force: bool = False, timeout: float = 10.0) -> dict:
             req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
-    except Exception:
+    except Exception as exc:
+        if cached_data is not None and age is not None and age <= _MANIFEST_STALE_MAX_SECONDS:
+            # Stale, but better than nothing (offline degrade).
+            log.warning(
+                "Release manifest for %s unreachable (%s); using cached copy %.1f h old",
+                repo, exc, age / 3600,
+            )
+            return cached_data
         if cached_data is not None:
-            return cached_data  # stale, but better than nothing (offline degrade)
+            log.warning(
+                "Release manifest for %s unreachable (%s); cached copy is too old "
+                "to trust (%s)", repo, exc,
+                "age unknown" if age is None else f"{age / 86400:.1f} days",
+            )
         raise
 
     try:

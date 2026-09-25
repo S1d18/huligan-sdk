@@ -597,3 +597,64 @@ def test_install_lock_times_out(cache_dir):
         t.start()
         t.join(5)
     assert errs
+
+
+# --- manifest cache: keyed by repo, bounded stale fallback -----------------
+
+
+def test_manifest_cache_is_keyed_by_releases_repo(cache_dir, monkeypatch):
+    default_cache = installer._manifest_cache_path()
+    default_cache.parent.mkdir(parents=True, exist_ok=True)
+    default_cache.write_text(json.dumps({"latest": "from-default"}), encoding="utf-8")
+
+    monkeypatch.setenv("HULIGAN_RELEASES_REPO", "someone/fork")
+    fork_cache = installer._manifest_cache_path()
+    assert fork_cache != default_cache
+    assert fork_cache.parent == default_cache.parent
+
+    seen = []
+
+    def fetch(req, *a, **k):
+        seen.append(req.full_url)
+        return _FakeResp(json.dumps({"latest": "from-fork"}).encode())
+
+    monkeypatch.setattr(installer.urllib.request, "urlopen", fetch)
+    # The default repo's FRESH cache must not be served for the fork.
+    assert installer._fetch_manifest()["latest"] == "from-fork"
+    assert seen and "someone/fork" in seen[0]
+    assert json.loads(fork_cache.read_text(encoding="utf-8"))["latest"] == "from-fork"
+    assert json.loads(default_cache.read_text(encoding="utf-8"))["latest"] == "from-default"
+
+    # And back on the default repo, its own cache is still used (no network).
+    monkeypatch.delenv("HULIGAN_RELEASES_REPO")
+    _no_network(monkeypatch)
+    assert installer._fetch_manifest()["latest"] == "from-default"
+
+
+def test_offline_stale_cache_logs_its_age(cache_dir, monkeypatch, caplog):
+    cache = installer._manifest_cache_path()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"latest": "stale"}), encoding="utf-8")
+    old = time.time() - 3 * 24 * 3600
+    os.utime(cache, (old, old))
+
+    def offline(*a, **k):
+        raise urllib.error.URLError("offline")
+    monkeypatch.setattr(installer.urllib.request, "urlopen", offline)
+    with caplog.at_level("WARNING", logger="huligan.installer"):
+        assert installer._fetch_manifest()["latest"] == "stale"
+    assert any("72.0 h old" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def test_offline_too_old_cache_is_refused(cache_dir, monkeypatch):
+    cache = installer._manifest_cache_path()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"latest": "ancient"}), encoding="utf-8")
+    old = time.time() - installer._MANIFEST_STALE_MAX_SECONDS - 3600
+    os.utime(cache, (old, old))
+
+    def offline(*a, **k):
+        raise urllib.error.URLError("offline")
+    monkeypatch.setattr(installer.urllib.request, "urlopen", offline)
+    with pytest.raises(urllib.error.URLError):
+        installer._fetch_manifest()

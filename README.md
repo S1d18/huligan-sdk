@@ -1,6 +1,6 @@
 # Huligan Antidetect Browser SDK
 
-Python SDK for controlling the Huligan antidetect Chromium browser. The browser spoofs 50+ fingerprint parameters at the C++ level (not JS injection), making it undetectable by BrowserScan, CreepJS, SannySoft, and other detectors.
+Python SDK for controlling the Huligan antidetect Chromium browser. The browser spoofs 50+ fingerprint parameters at the C++ level (not JS injection). On the build this SDK pins, Chrome 152.0.7977.65, our release validation gate (2026-08-30; headed run through a real proxy, read by an operator) measured BrowserScan 100% and CreepJS `lies (0)` against a pass threshold of BrowserScan ≥ 97% and 0 CreepJS lies. That is a measurement for that build, not a guarantee: results depend on the profile, the proxy and the detectors' own versions, and the gate is re-run on every Chrome upgrade.
 
 ## Install
 

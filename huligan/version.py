@@ -10,6 +10,11 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 4 (2026-09-26): audit P2, same Chrome 152.0.7977.65. pyproject 1.6.2 -> 1.6.3.
+#   https:// upstream proxies really use TLS (NET-01); manual .conf timezone honoured;
+#   public set_launch_selection()/get_launch_selection(); same-version rebuild
+#   detected via sha in .ok; bundle size budgets (ProfileBundleError); serve fixes.
+#
 # Build 3 (2026-09-24): pre-release audit P1 fixes, same Chrome 152.0.7977.65.
 #   pyproject 1.6.1 -> 1.6.2. LaunchResult.stop() now returns bool and never
 #   frees the .conf/forwarder of a Chrome that is still alive (PROC-01); partial
@@ -99,7 +104,7 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 3
+BUILD_NUMBER = 4
 
 # Patched Chrome version this SDK release expects to launch.
 CHROME_VERSION = "152.0.7977.65"

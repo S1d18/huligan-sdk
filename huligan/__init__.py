@@ -107,7 +107,7 @@ try:
 except ImportError:
     pass
 
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 __all__ = [
     "Browser",
     "launch_persistent",

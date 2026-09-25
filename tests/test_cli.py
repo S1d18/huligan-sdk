@@ -179,3 +179,59 @@ def test_cli_list_runs(cache_dir, monkeypatch, capsys):
 def test_cli_version_runs(cache_dir, capsys):
     assert cli.main(["version"]) == 0
     assert "Chrome" in capsys.readouterr().out
+
+
+# --- CLI: update persists the selection only after success -----------------
+
+def test_cli_update_channel_not_persisted_when_download_fails(cache_dir, monkeypatch, capsys):
+    installer.set_launch_selection(version="150.0.7871.101")
+    before = installer._load_config()
+    version = "160.0.0.1"
+    manifest = {"latest": version,
+                "versions": {version: {"min_conf_schema": 1, "win64": {"sha256": "s"}}}}
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+
+    def fail(*a, **k):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(installer, "ensure_chrome", fail)
+
+    rc = cli.main(["chrome", "update", "--channel", "latest"])
+    assert rc == 1
+    assert installer._load_config() == before      # old pin still in force
+    assert installer.resolve_launch_target()[0] == "150.0.7871.101"
+
+
+def test_cli_update_channel_persisted_after_successful_download(cache_dir, monkeypatch, capsys):
+    version = "160.0.0.1"
+    manifest = {"latest": version,
+                "versions": {version: {"min_conf_schema": 1, "win64": {"sha256": "s"}}}}
+    monkeypatch.setattr(installer, "_fetch_manifest", lambda *a, **k: manifest)
+    got = []
+    monkeypatch.setattr(installer, "ensure_chrome",
+                        lambda v, *a, **k: got.append(v) or cache_dir / v / "chrome.exe")
+    rc = cli.main(["chrome", "update", "--channel", "latest"])
+    assert rc == 0 and got == [version]
+    assert installer.get_launch_selection() == {"channel": "latest", "pinned_version": None}
+
+
+def test_cli_update_after_pin_fetches_the_pinned_build(cache_dir, monkeypatch, capsys):
+    pinned = "150.0.7871.101"
+    assert pinned != CHROME_VERSION
+    assert cli.main(["chrome", "pin", pinned]) == 0
+    got = []
+    monkeypatch.setattr(installer, "ensure_chrome",
+                        lambda v, *a, **k: got.append(v) or cache_dir / v / "chrome.exe")
+    rc = cli.main(["chrome", "update"])
+    assert rc == 0
+    assert got == [pinned]
+    assert installer.get_launch_selection()["pinned_version"] == pinned
+    assert f"pin {pinned}" in capsys.readouterr().out
+
+
+def test_cli_update_check_after_pin_reports_the_pinned_build(cache_dir, capsys):
+    pinned = "150.0.7871.101"
+    cli.main(["chrome", "pin", pinned])
+    capsys.readouterr()
+    assert cli.main(["chrome", "update", "--check"]) == 0
+    out = capsys.readouterr().out
+    assert pinned in out and "NOT installed" in out

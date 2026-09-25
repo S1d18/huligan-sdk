@@ -72,43 +72,57 @@ def _cmd_chrome_list(_args) -> int:
 
 def _cmd_chrome_update(args) -> int:
     # An explicit --channel both switches the persisted channel and updates.
+    # The switch is persisted only AFTER the target build is installed: a
+    # failed download must leave the previous selection (and its working
+    # build) in force.
     if args.channel:
         channel = args.channel.strip().lower()
-        if not args.check:
-            cfg = installer._load_config()
-            cfg["channel"] = channel
-            cfg.pop("pinned_version", None)
-            installer._save_config(cfg)
-            print(f"Channel set to '{channel}'.")
+        if not installer._CHANNEL_RE.fullmatch(channel):
+            print(f"Invalid channel {args.channel!r}", file=sys.stderr)
+            return 2
+        label = f"channel '{channel}'"
+        resolve = lambda: installer.resolve_version(channel)  # noqa: E731
     else:
+        # No --channel: update what launches actually use, including an exact
+        # `huligan chrome pin X` (resolve_version("pinned") would ignore X).
         channel, _ = installer.effective_channel()
+        pinned = installer.get_launch_selection()["pinned_version"]
+        label = (f"pin {pinned}" if channel == "pinned" and pinned
+                 and os.environ.get("HULIGAN_CHROME_CHANNEL") is None
+                 else f"channel '{channel}'")
+        resolve = installer.resolve_launch_target
 
     try:
-        version, _sha = installer.resolve_version(channel)
+        version, _sha = resolve()
     except installer.IncompatibleBuildError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     except Exception as exc:
-        print(f"Could not resolve channel '{channel}': {exc}", file=sys.stderr)
+        print(f"Could not resolve {label}: {exc}", file=sys.stderr)
         return 1
 
     already = installer.is_installed(version)
     if args.check:
         state = "already installed" if already else "NOT installed"
-        print(f"Channel '{channel}' -> Chrome {version} ({state}).")
+        print(f"{label[0].upper()}{label[1:]} -> Chrome {version} ({state}).")
         return 0
 
     if already:
-        print(f"Chrome {version} already installed (channel '{channel}').")
-        return 0
+        print(f"Chrome {version} already installed ({label}).")
+    else:
+        print(f"Updating to Chrome {version} ({label})...")
+        try:
+            path = installer.ensure_chrome(version)
+        except Exception as exc:
+            print(f"Update failed: {exc}", file=sys.stderr)
+            if args.channel:
+                print("Channel selection left unchanged.", file=sys.stderr)
+            return 1
+        print(f"Installed at {path}")
 
-    print(f"Updating to Chrome {version} (channel '{channel}')...")
-    try:
-        path = installer.ensure_chrome(version)
-    except Exception as exc:
-        print(f"Update failed: {exc}", file=sys.stderr)
-        return 1
-    print(f"Installed at {path}")
+    if args.channel:
+        installer.set_launch_selection(channel=channel)
+        print(f"Channel set to '{channel}'.")
     return 0
 
 

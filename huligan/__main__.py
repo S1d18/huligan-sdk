@@ -115,33 +115,26 @@ def _cmd_chrome_update(args) -> int:
 # --- chrome pin -----------------------------------------------------------
 
 def _cmd_chrome_pin(args) -> int:
-    cfg = installer._load_config()
-
     if args.clear:
-        cfg.pop("channel", None)
-        cfg.pop("pinned_version", None)
-        installer._save_config(cfg)
+        installer.set_launch_selection()
         print(f"Pin cleared - back to default pinned Chrome {CHROME_VERSION}.")
         return 0
 
     if not args.version:
         channel, source = installer.effective_channel()
         print(f"Channel: {channel} (from {source})")
-        if cfg.get("pinned_version"):
-            print(f"Pinned override: {cfg['pinned_version']}")
+        pinned = installer.get_launch_selection()["pinned_version"]
+        if pinned:
+            print(f"Pinned override: {pinned}")
         else:
             print(f"No exact pin set (default {CHROME_VERSION}).")
         return 0
 
     try:
-        installer.validate_version(args.version)
+        installer.set_launch_selection(version=args.version)
     except ValueError as exc:
         print(f"Cannot pin: {exc}", file=sys.stderr)
         return 2
-
-    cfg["channel"] = "pinned"
-    cfg["pinned_version"] = args.version
-    installer._save_config(cfg)
     print(f"Pinned to Chrome {args.version}. Run 'huligan chrome update' to fetch it now.")
     return 0
 

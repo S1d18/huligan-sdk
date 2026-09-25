@@ -21,6 +21,8 @@ from .installer import (
     latest_version,
     is_installed,
     IncompatibleBuildError,
+    get_launch_selection,
+    set_launch_selection,
 )
 from .conf_spec import CONF_SCHEMA_VERSION
 from .coherence import (
@@ -130,6 +132,8 @@ __all__ = [
     "latest_version",
     "is_installed",
     "IncompatibleBuildError",
+    "get_launch_selection",
+    "set_launch_selection",
     "CONF_SCHEMA_VERSION",
     "validate_profile",
     "validate_conf",

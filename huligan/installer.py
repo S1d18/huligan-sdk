@@ -149,9 +149,76 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict) -> None:
+    """Persist the config atomically (temp file + ``os.replace``): a crash or a
+    concurrent reader never sees a half-written ``config.json``."""
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        _unlink_quiet(tmp)
+
+
+# A channel name is a manifest key ("pinned", "stable", "latest", ...).
+_CHANNEL_RE = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+
+
+def get_launch_selection() -> dict:
+    """The persisted launch selection: ``{"channel": str|None, "pinned_version": str|None}``.
+
+    Only the persisted config (what :func:`set_launch_selection` / ``huligan
+    chrome pin`` wrote); ``HULIGAN_CHROME_CHANNEL`` is not applied here — use
+    :func:`effective_channel` / :func:`resolve_launch_target` for what is in force.
+    """
+    cfg = _load_config()
+    channel = cfg.get("channel")
+    pinned = cfg.get("pinned_version")
+    return {
+        "channel": str(channel) if channel else None,
+        "pinned_version": str(pinned) if pinned else None,
+    }
+
+
+def set_launch_selection(version: Optional[str] = None,
+                         channel: Optional[str] = None) -> dict:
+    """Persist which Chrome build launches use; the public setter behind
+    ``huligan chrome pin`` / ``update --channel`` (apps should call this
+    instead of the private config helpers).
+
+    * ``version`` given   -> exact pin: ``channel="pinned"`` + ``pinned_version``.
+      ``version`` must be a four-part numeric build (``ValueError`` otherwise);
+      combining it with a channel other than ``"pinned"`` is a ``ValueError``.
+    * only ``channel``    -> follow that channel; any exact pin is cleared.
+    * neither             -> clear both: back to the SDK's built-in default.
+
+    Nothing is downloaded or resolved here. Other config keys are preserved and
+    the write is atomic. Returns the new selection (as :func:`get_launch_selection`).
+    """
+    if channel is not None:
+        if not isinstance(channel, str) or not _CHANNEL_RE.fullmatch(channel.strip().lower()):
+            raise ValueError(f"Invalid channel {channel!r}")
+        channel = channel.strip().lower()
+    if version is not None:
+        validate_version(version)
+        if channel not in (None, "pinned"):
+            raise ValueError(
+                f"An exact version pin implies channel 'pinned', got {channel!r}")
+    cfg = _load_config()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    if version is not None:
+        cfg["channel"] = "pinned"
+        cfg["pinned_version"] = version
+    elif channel is not None:
+        cfg["channel"] = channel
+        cfg.pop("pinned_version", None)
+    else:
+        cfg.pop("channel", None)
+        cfg.pop("pinned_version", None)
+    _save_config(cfg)
+    return get_launch_selection()
 
 
 def effective_channel() -> Tuple[str, str]:

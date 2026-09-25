@@ -227,3 +227,66 @@ def test_version_endpoint_accepts_trailing_slash(monkeypatch, target):
     assert raw.startswith(b"HTTP/1.1 200"), raw[:80]
     assert b"/seed/42/devtools/browser/abc" in raw
     assert [k for k, _ in spawned] == ["42"]
+
+
+class _StubbornResult(_FakeResult):
+    """stop() reports failure (Chrome survived terminate+kill) N times."""
+
+    def __init__(self, failures, port=55123):
+        super().__init__(port)
+        self.failures = failures
+        self.calls = 0
+
+    def stop(self):
+        self.calls += 1
+        if self.calls <= self.failures:
+            return False                     # still alive
+        self.stopped = True
+        self._alive = False
+        return True
+
+
+def test_idle_gc_keeps_entry_and_retries_when_stop_fails(monkeypatch, caplog):
+    async def run():
+        mux = ServeMux(ServeConfig(idle_timeout=0.02))
+        mux.gc_retry_delay = 0.05
+        stubborn = _StubbornResult(failures=1)
+        monkeypatch.setattr(mux, "_spawn", lambda seed_key: stubborn)
+        mux._loop = asyncio.get_event_loop()
+        entry = await mux._acquire("42")
+        mux._ref_inc(entry)
+        mux._ref_dec(entry)                      # schedules idle GC
+        await asyncio.sleep(0.03)
+        for _ in range(50):                      # first stop() -> False
+            if stubborn.calls >= 1 and entry.stop_task is None:
+                break
+            await asyncio.sleep(0.01)
+        assert stubborn.calls == 1
+        # Chrome is still alive: must NOT be forgotten.
+        assert mux.registry.get("42") is entry
+        assert entry.gc_handle is not None       # retry scheduled
+        # A client asking for seed 42 meanwhile gets the live process, not a
+        # second Chrome on the same user-data-dir.
+        assert await mux._acquire("42") is entry
+        await asyncio.sleep(0.2)                 # retry fires, succeeds
+        assert stubborn.calls == 2 and stubborn.stopped
+        assert "42" not in mux.registry
+
+    with caplog.at_level("WARNING", logger="huligan.serve"):
+        asyncio.run(run())
+    assert any("still running after stop()" in r.getMessage() for r in caplog.records)
+
+
+def test_shutdown_logs_stop_failure(monkeypatch, caplog):
+    async def run():
+        mux = ServeMux(ServeConfig())
+        stubborn = _StubbornResult(failures=5)
+        monkeypatch.setattr(mux, "_spawn", lambda seed_key: stubborn)
+        mux._loop = asyncio.get_event_loop()
+        await mux._acquire("7")
+        await mux.stop()
+
+    with caplog.at_level("ERROR", logger="huligan.serve"):
+        asyncio.run(run())
+    assert any("seed 7" in r.getMessage() and "still running" in r.getMessage()
+               for r in caplog.records)

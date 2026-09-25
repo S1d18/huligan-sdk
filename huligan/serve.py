@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -34,6 +35,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .fingerprint import FingerprintProfile
 from .persistent import launch_persistent
+
+log = logging.getLogger("huligan.serve")
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9222
@@ -65,6 +68,7 @@ class _SeedProcess:
     ref_count: int = 0
     last_active: float = 0.0
     gc_handle: Optional[asyncio.TimerHandle] = None
+    stop_task: Optional[asyncio.Future] = None   # set while an idle-GC stop() runs
 
 
 class _MaxProcessesError(RuntimeError):
@@ -271,6 +275,9 @@ def _rebuild_upgrade_request(real_path: str, raw_lines: List[str], real_port: in
 # --- the multiplexer ------------------------------------------------------
 
 class ServeMux:
+    # Delay before retrying an idle-GC stop() that reported Chrome still alive.
+    gc_retry_delay: float = 30.0
+
     def __init__(self, config: ServeConfig):
         self.cfg = config
         self.registry: Dict[str, _SeedProcess] = {}
@@ -310,11 +317,18 @@ class ServeMux:
             except Exception:
                 pass
             self._server = None
-        for entry in list(self.registry.values()):
+        for key, entry in list(self.registry.items()):
             try:
-                await self._loop.run_in_executor(None, entry.result.stop)
-            except Exception:
-                pass
+                ok = await self._loop.run_in_executor(None, entry.result.stop)
+            except Exception as e:
+                log.error("serve: stopping seed %s failed: %s", key, e)
+                continue
+            if ok is False:
+                log.error(
+                    "serve: Chrome for seed %s (PID %s) is still running after stop(); "
+                    "it is left alive with its .conf/forwarder intact — kill it manually",
+                    key, getattr(entry.result, "pid", "?"),
+                )
         self.registry.clear()
 
     async def serve_forever(self) -> None:
@@ -391,7 +405,7 @@ class ServeMux:
             return
 
         entry = self.registry.get(seed_key)
-        if entry is None or entry.result.poll() is not None:
+        if entry is None or entry.stop_task is not None or entry.result.poll() is not None:
             try:
                 entry = await self._acquire(seed_key)   # reconnect after GC / restart
             except Exception:
@@ -431,10 +445,19 @@ class ServeMux:
     async def _acquire(self, seed) -> _SeedProcess:
         seed_key = str(int(seed))
         entry = self.registry.get(seed_key)
-        if entry and entry.result.poll() is None:
+        if entry and entry.stop_task is None and entry.result.poll() is None:
             return entry
         async with self._lock_for(seed_key):
             entry = self.registry.get(seed_key)
+            if entry is not None and entry.stop_task is not None:
+                # An idle-GC stop() is in flight for this seed: wait for it
+                # instead of attaching to a dying Chrome or spawning a second
+                # one on the same user-data-dir.
+                try:
+                    await asyncio.shield(entry.stop_task)
+                except Exception:
+                    pass
+                entry = self.registry.get(seed_key)
             if entry and entry.result.poll() is None:
                 return entry
             if self.cfg.max_processes and len(self.registry) >= self.cfg.max_processes:
@@ -480,12 +503,41 @@ class ServeMux:
             entry.gc_handle = self._loop.call_later(self.cfg.idle_timeout, self._gc, entry)
 
     def _gc(self, entry: _SeedProcess) -> None:
-        if entry.ref_count > 0:
+        entry.gc_handle = None
+        if entry.ref_count > 0 or entry.stop_task is not None:
             return
         key = next((k for k, v in self.registry.items() if v is entry), None)
-        if key is not None:
-            self.registry.pop(key, None)
-        self._loop.run_in_executor(None, entry.result.stop)
+        if key is None:
+            return
+        entry.stop_task = asyncio.ensure_future(self._gc_stop(key, entry))
+
+    async def _gc_stop(self, key: str, entry: _SeedProcess) -> None:
+        """Run ``LaunchResult.stop()`` off-loop; drop the entry only on success.
+
+        ``stop()`` returns ``False`` when Chrome survived terminate+kill. The
+        entry then stays registered (so no second Chrome is spawned onto the
+        same user-data-dir and the process is not forgotten) and the stop is
+        retried after :attr:`gc_retry_delay`."""
+        try:
+            try:
+                ok = await self._loop.run_in_executor(None, entry.result.stop)
+            except Exception as e:
+                log.error("serve: idle stop of seed %s raised: %s", key, e)
+                ok = False
+            if ok is False and entry.result.poll() is None:
+                log.warning(
+                    "serve: Chrome for seed %s (PID %s) still running after stop(); "
+                    "keeping it registered, retrying in %.0fs",
+                    key, getattr(entry.result, "pid", "?"), self.gc_retry_delay,
+                )
+                if entry.ref_count <= 0 and self.registry.get(key) is entry:
+                    entry.gc_handle = self._loop.call_later(
+                        self.gc_retry_delay, self._gc, entry)
+                return
+            if self.registry.get(key) is entry:
+                self.registry.pop(key, None)
+        finally:
+            entry.stop_task = None
 
     async def _reap_loop(self) -> None:
         """Drop registry entries whose Chrome self-exited."""

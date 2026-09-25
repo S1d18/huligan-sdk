@@ -209,6 +209,20 @@ def _token_ok(auth_header: str, token: str) -> bool:
     return False
 
 
+_JSON_ENDPOINTS = ("/json/version", "/json", "/json/list", "/json/new")
+
+
+def _json_endpoint_target(target: str) -> Optional[str]:
+    """Return ``target`` normalized for the DevTools JSON endpoints, else None.
+
+    Playwright requests ``<endpoint>/json/version/`` WITH a trailing slash
+    (``connect_over_cdp("http://host:9222/fp/42")`` -> ``/fp/42/json/version/``),
+    and Chrome itself accepts both spellings, so trailing slashes are dropped
+    before matching."""
+    t = target.rstrip("/")
+    return t if t.endswith(_JSON_ENDPOINTS) else None
+
+
 def _extract_seed(target: str) -> Optional[str]:
     """Pull the fingerprint seed from an HTTP request-target, tolerating
     Playwright's string-concat of ``/json/version`` onto the endpoint URL
@@ -327,8 +341,8 @@ class ServeMux:
 
             if headers.get("upgrade", "").lower() == "websocket" and target.startswith("/seed/"):
                 await self._handle_ws(reader, writer, target, raw_lines)
-            elif target.endswith(("/json/version", "/json", "/json/list", "/json/new")):
-                await self._handle_version(writer, target)
+            elif _json_endpoint_target(target) is not None:
+                await self._handle_version(writer, _json_endpoint_target(target))
             else:
                 await _send_simple(writer, 404, "not found")
         except Exception:

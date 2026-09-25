@@ -185,3 +185,45 @@ def test_origin_guard_rejects_loopback_lookalikes():
         "https://[::1]",
     ):
         assert srv._origin_allowed({"origin": ok}, ()) is True, ok
+
+
+# --- HTTP dispatch over a real socket (fake process, no Chrome) ----------
+
+async def _http_get(port, target):
+    r, w = await asyncio.open_connection("127.0.0.1", port)
+    w.write(f"GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+    await w.drain()
+    data = await asyncio.wait_for(r.read(), 5)
+    w.close()
+    return data
+
+
+@pytest.mark.parametrize("target", [
+    "/fp/42/json/version",
+    "/fp/42/json/version/",          # what Playwright actually sends
+    "/?fingerprint=42/json/version/",
+    "/fp/42/json/",
+])
+def test_version_endpoint_accepts_trailing_slash(monkeypatch, target):
+    def fake_version(real_port):
+        return {"Browser": "Chrome/154",
+                "webSocketDebuggerUrl": f"ws://127.0.0.1:{real_port}/devtools/browser/abc"}
+
+    monkeypatch.setattr(srv, "_fetch_version", fake_version)
+
+    async def run():
+        mux, spawned = _mux_with_fake(monkeypatch, port=0)
+        await mux.start()
+        try:
+            port = mux._server.sockets[0].getsockname()[1]
+            raw = await _http_get(port, target)
+        finally:
+            for _k, r in spawned:
+                r._alive = False
+            await mux.stop()
+        return raw, spawned
+
+    raw, spawned = asyncio.run(run())
+    assert raw.startswith(b"HTTP/1.1 200"), raw[:80]
+    assert b"/seed/42/devtools/browser/abc" in raw
+    assert [k for k, _ in spawned] == ["42"]

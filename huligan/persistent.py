@@ -59,6 +59,7 @@ from .launch_plan import (
     find_free_port,
     read_conf_value,
     resolve_conf_language,
+    resolve_conf_timezone,
     update_conf_keys,
 )
 from .proxy import (
@@ -409,6 +410,11 @@ def launch_persistent(
     # it must reach --accept-lang, or HTTP Accept-Language contradicts
     # navigator.languages (LANG-01). Raises ValueError on a conflict.
     language = resolve_conf_language(profile_path, language)
+    # Same rule for a manual timezone in the .conf (timezone_mode=manual): it
+    # wins over GeoIP. Only an EXPLICIT timezone= suppresses the GeoIP lookup
+    # (existing semantics); a conf-manual zone just overrides the result, so
+    # GeoIP still fills language/geolocation for fields left on auto.
+    conf_tz = resolve_conf_timezone(profile_path, timezone)
     resolved = _resolve_geo(
         proxy_info,
         timezone=timezone,
@@ -417,7 +423,7 @@ def launch_persistent(
         resolve_webrtc=not existing_webrtc,
     )
     geo = resolved.geo
-    tz = resolved.timezone
+    tz = conf_tz or resolved.timezone
     lang = resolved.languages
     webrtc_spoof_ip: Optional[str] = existing_webrtc or resolved.webrtc_spoof_ipv4
 
@@ -429,7 +435,7 @@ def launch_persistent(
     if conf_geo in ("copy", "inplace"):
         if tz:
             updates["timezone"] = tz
-            updates["timezone_mode"] = "manual" if timezone else "auto"
+            updates["timezone_mode"] = "manual" if conf_tz else "auto"
         if lang:
             updates["languages"] = lang
             updates["language_mode"] = "manual" if language else "auto"

@@ -48,6 +48,7 @@ from .launch_plan import (
     conf_geolocation_is_manual,
     find_free_port,
     resolve_conf_language,
+    resolve_conf_timezone,
     update_conf_keys,
 )
 from .proxy import (
@@ -104,6 +105,7 @@ class Browser:
         self._fingerprint_opts = fingerprint or {}
         self._humanize = humanize
         self._timezone_override = timezone
+        self._timezone_effective: Optional[str] = timezone
         self._language_override = language
         self._language_effective: Optional[str] = language
         self._cdp_port_input = cdp_port
@@ -179,6 +181,12 @@ class Browser:
         # ValueError when the kwarg contradicts it.
         self._language_effective = resolve_conf_language(
             self._profile_path, self._language_override
+        )
+        # Same for timezone_mode=manual: the conf's zone beats GeoIP. Only an
+        # explicit timezone= kwarg skips the GeoIP lookup below; a conf-manual
+        # zone just overrides its timezone result.
+        self._timezone_effective = resolve_conf_timezone(
+            self._profile_path, self._timezone_override
         )
 
         # 4. GeoIP lookup.
@@ -264,7 +272,7 @@ class Browser:
                 )
 
         # 5. Update .conf with timezone/language
-        timezone = self._timezone_override
+        timezone = self._timezone_effective
         language = self._language_effective
 
         if self._geo and not timezone:
@@ -509,8 +517,9 @@ class Browser:
         updates = {}
         if timezone:
             updates["timezone"] = timezone
-            # mode: "auto" if timezone came from GeoIP, "manual" if from user override
-            updates["timezone_mode"] = "manual" if self._timezone_override else "auto"
+            # mode: "auto" if timezone came from GeoIP, "manual" if from the
+            # user (timezone= kwarg or the profile's own timezone_mode=manual)
+            updates["timezone_mode"] = "manual" if self._timezone_effective else "auto"
         if language:
             updates["languages"] = language
             updates["language_mode"] = "manual" if self._language_effective else "auto"

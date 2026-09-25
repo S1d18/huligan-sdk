@@ -329,6 +329,32 @@ def resolve_conf_language(
     return explicit or conf_lang
 
 
+def resolve_conf_timezone(
+    profile_path: Union[str, Path, None], explicit: Optional[str]
+) -> Optional[str]:
+    """Effective launch timezone: the explicit argument, else the .conf's own
+    ``timezone`` when it is in ``timezone_mode=manual``, else ``None`` (GeoIP).
+
+    Timezone counterpart of :func:`resolve_conf_language`: without it a direct
+    SDK launch of a ``timezone_mode=manual`` profile let GeoIP overwrite the
+    user's zone in the launched .conf and in ``TZ``.
+
+    Raises ``ValueError`` if ``explicit`` contradicts a manual conf value
+    (compared case-insensitively): one of the two would be ignored.
+    """
+    conf_tz: Optional[str] = None
+    mode = (read_conf_value(profile_path, "timezone_mode") or "").strip().lower()
+    if mode == "manual":
+        conf_tz = (read_conf_value(profile_path, "timezone") or "").strip() or None
+    if explicit and conf_tz and explicit.strip().lower() != conf_tz.lower():
+        raise ValueError(
+            f"timezone={explicit!r} conflicts with the profile's manual "
+            f"timezone={conf_tz!r} (timezone_mode=manual in {profile_path}). "
+            f"Drop the timezone argument or change the profile."
+        )
+    return explicit or conf_tz
+
+
 def conf_geolocation_is_manual(profile_path: Union[str, Path, None]) -> bool:
     """True when the .conf pins its own position (``geolocation_mode=manual``),
     so GeoIP-derived latitude/longitude must not overwrite it."""

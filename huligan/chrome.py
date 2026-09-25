@@ -52,6 +52,7 @@ def find_chrome(
 
     from .installer import (
         ensure_chrome, resolve_launch_target, IncompatibleBuildError, _cache_root, is_installed,
+        _install_matches,
     )
     from .version import CHROME_VERSION
 
@@ -60,8 +61,9 @@ def find_chrome(
     # channel build that this SDK's .conf schema can't feed degrades to the
     # pinned build (compat gate); any other resolution failure (offline +
     # uncached) also degrades, so a network blip never bricks launch.
+    target_sha = None
     try:
-        target_version, _ = resolve_launch_target()
+        target_version, target_sha = resolve_launch_target()
     except IncompatibleBuildError as exc:
         print(
             f"[huligan] {exc}\n"
@@ -74,7 +76,12 @@ def find_chrome(
     # is_installed() also requires the .ok marker: a bare chrome.exe is what an
     # interrupted extraction leaves behind, and a half-extracted build launches
     # (or crashes) without its .pak/.dat files.
+    # A cached build whose recorded sha differs from the expected one is a
+    # republished version: ensure_chrome() reinstalls it (and falls back to
+    # the cached build if that fails).
     if is_installed(target_version):
+        if auto_install and not _install_matches(target_version, target_sha):
+            return ensure_chrome(target_version).resolve()
         return (_cache_root() / target_version / "chrome.exe").resolve()
 
     if auto_install:

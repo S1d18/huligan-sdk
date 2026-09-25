@@ -93,7 +93,7 @@ def _cmd_chrome_update(args) -> int:
         resolve = installer.resolve_launch_target
 
     try:
-        version, _sha = resolve()
+        version, sha = resolve()
     except installer.IncompatibleBuildError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -101,7 +101,9 @@ def _cmd_chrome_update(args) -> int:
         print(f"Could not resolve {label}: {exc}", file=sys.stderr)
         return 1
 
-    already = installer.is_installed(version)
+    # A cached build whose .ok sha differs from the expected one was
+    # republished under the same version: not "already installed".
+    already = installer.is_installed(version) and installer._install_matches(version, sha)
     if args.check:
         state = "already installed" if already else "NOT installed"
         print(f"{label[0].upper()}{label[1:]} -> Chrome {version} ({state}).")

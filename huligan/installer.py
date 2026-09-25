@@ -618,6 +618,23 @@ def _installed_sha256(version: str) -> Optional[str]:
     return None
 
 
+def _install_matches(version: str, expected_sha: Optional[str]) -> bool:
+    """False only when BOTH shas are known and differ.
+
+    The ``.ok`` sentinel records the sha256 the build was verified against. If
+    the expected sha (baked-in, or from the release manifest) is different, the
+    same version was republished (a rebuild) and the cached tree is not the
+    build clients should run. Unknown on either side (legacy sentinel, manifest
+    offline) counts as a match: the working cache keeps being used.
+    """
+    if not expected_sha:
+        return True
+    installed = _installed_sha256(version)
+    if not installed:
+        return True
+    return installed.strip().lower() == expected_sha.strip().lower()
+
+
 @contextmanager
 def _install_lock(root: Path, version: str, timeout: float = 3600.0, poll: float = 0.5):
     """Exclusive inter-process lock on ``{root}/{version}.lock``.
@@ -708,7 +725,8 @@ def ensure_chrome(
     root, target_dir, sentinel = _version_paths(version)
     chrome_exe = target_dir / "chrome.exe"
 
-    if chrome_exe.is_file() and sentinel.exists():
+    installed = chrome_exe.is_file() and sentinel.exists()
+    if installed and _install_matches(version, expected_sha):
         return chrome_exe
 
     # SEC-03: never download + extract a build we cannot verify. A version that
@@ -723,18 +741,50 @@ def ensure_chrome(
             f"published version, or upgrade the SDK."
         )
 
+    if installed:
+        # Same version, different sha: the build was republished. Reinstall,
+        # but a working cached build is never lost to a failed replacement
+        # (offline, download error, files in use by a running Chrome).
+        log.warning(
+            "Chrome %s in cache was verified against sha256 %s, but the expected "
+            "sha256 is now %s (build republished); reinstalling",
+            version, _installed_sha256(version), expected_sha,
+        )
+        try:
+            return _install_build(version, expected_sha, progress_callback)
+        except Exception as exc:
+            log.warning(
+                "Reinstall of Chrome %s failed (%s); keeping the cached build", version, exc)
+            return chrome_exe
+    return _install_build(version, expected_sha, progress_callback)
+
+
+def _install_build(
+    version: str,
+    expected_sha: str,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> Path:
+    """Download, verify and atomically install ``version`` (under the lock)."""
+    root, target_dir, sentinel = _version_paths(version)
+    chrome_exe = target_dir / "chrome.exe"
+
     # One installer per version at a time, across processes (a GUI and a CLI,
     # or several SDK processes on a farm). Whoever waited re-checks the cache:
     # the first holder has usually finished the job.
     with _install_lock(root, version):
-        if chrome_exe.is_file() and sentinel.exists():
+        working = chrome_exe.is_file() and sentinel.exists()
+        if working and _install_matches(version, expected_sha):
             return chrome_exe
         # Not installed (or damaged). A stale sentinel must not survive into a
-        # repair that might be interrupted.
-        _unlink_quiet(sentinel)
+        # repair that might be interrupted. A WORKING build being replaced by a
+        # rebuild keeps its sentinel until the new tree is ready to swap in.
+        if not working:
+            _unlink_quiet(sentinel)
         # Leftovers of a crashed installer for this version (we hold the lock,
         # so nobody else is using them).
         for leftover in root.glob(f"{version}.tmp-*"):
+            shutil.rmtree(leftover, ignore_errors=True)
+        for leftover in root.glob(f"{version}.old-*"):
             shutil.rmtree(leftover, ignore_errors=True)
 
         repo = os.environ.get("HULIGAN_RELEASES_REPO", DEFAULT_REPO)
@@ -803,10 +853,32 @@ def ensure_chrome(
 
                 # The sentinel goes BEFORE the old tree: an interruption from here
                 # on must never leave "{version}.ok" next to a half-replaced dir.
+                old_marker = sentinel.read_bytes() if working else None
                 _unlink_quiet(sentinel)
+                aside = None
                 if target_dir.exists():
-                    shutil.rmtree(target_dir)
-                os.replace(staging, target_dir)
+                    # Move the old tree aside in one rename instead of deleting
+                    # it in place: a Chrome still running from it makes the
+                    # rename fail cleanly, where rmtree would half-delete it.
+                    aside = root / f"{version}.old-{os.getpid()}"
+                    try:
+                        os.replace(target_dir, aside)
+                    except OSError:
+                        aside = None
+                        if old_marker is not None:
+                            sentinel.write_bytes(old_marker)  # old build intact
+                            raise
+                        shutil.rmtree(target_dir)
+                try:
+                    os.replace(staging, target_dir)
+                except OSError:
+                    if aside is not None and not target_dir.exists():
+                        os.replace(aside, target_dir)
+                        if old_marker is not None:
+                            sentinel.write_bytes(old_marker)
+                    raise
+                if aside is not None:
+                    shutil.rmtree(aside, ignore_errors=True)
             finally:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)

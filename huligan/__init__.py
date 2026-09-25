@@ -37,6 +37,7 @@ from .profile_bundle import (
     extract_profile_bundle,
     read_profile_bundle,
     write_profile_bundle,
+    ProfileBundleError,
 )
 from .launch_plan import build_launch_plan, get_default_stealth_args
 from .persistent import launch_persistent, LaunchSession, LaunchResult
@@ -144,6 +145,7 @@ __all__ = [
     "extract_profile_bundle",
     "read_profile_bundle",
     "write_profile_bundle",
+    "ProfileBundleError",
 ]
 if _HAS_MOUSE_KB:
     __all__ += ["human_like_mouse_click", "human_like_type", "human_like_hotkey",

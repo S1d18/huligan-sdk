@@ -32,6 +32,41 @@ _CONF_NAME = "profile.conf"
 _COOKIES_NAME = "cookies.json"
 _META_NAME = "bundle.json"
 
+# Budgets for reading an untrusted bundle (BUNDLE-LIMIT-01). Checked against the
+# declared ZipInfo.file_size BEFORE anything is decompressed, and enforced again
+# while reading (zipfile stops at the declared size and CRC-checks it). A real
+# .conf is a few KiB and a heavy cookie jar a few MiB; these leave ample margin
+# while keeping a zip bomb from ballooning memory.
+MAX_CONF_BYTES = 256 * 1024
+MAX_COOKIES_BYTES = 32 * 1024 * 1024
+MAX_META_BYTES = 64 * 1024
+MAX_MEMBERS = 3
+_MEMBER_LIMITS = {
+    _CONF_NAME: MAX_CONF_BYTES,
+    _COOKIES_NAME: MAX_COOKIES_BYTES,
+    _META_NAME: MAX_META_BYTES,
+}
+
+
+class ProfileBundleError(ValueError):
+    """The file is not a well-formed, within-budget huligan profile bundle."""
+
+
+def _read_member(z: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    limit = _MEMBER_LIMITS[info.filename]
+    if info.file_size > limit:
+        raise ProfileBundleError(
+            f"bundle member {info.filename} is {info.file_size} bytes "
+            f"(limit {limit})")
+    try:
+        with z.open(info) as fh:
+            data = fh.read(limit + 1)
+    except zipfile.BadZipFile as e:   # e.g. CRC / size header that lies
+        raise ProfileBundleError(f"bundle member {info.filename} is corrupt ({e})") from e
+    if len(data) > limit:
+        raise ProfileBundleError(f"bundle member {info.filename} exceeds {limit} bytes")
+    return data
+
 
 # --- pure (no browser) ----------------------------------------------------
 
@@ -63,17 +98,45 @@ def write_profile_bundle(
 
 
 def read_profile_bundle(path) -> dict:
-    """Read a bundle into ``{conf_text, cookie_bundle, meta}`` (no extraction)."""
-    with zipfile.ZipFile(Path(path)) as z:
-        names = set(z.namelist())
+    """Read a bundle into ``{conf_text, cookie_bundle, meta}`` (no extraction).
+
+    The bundle is untrusted input: raises :class:`ProfileBundleError` (a
+    ``ValueError``) for a non-zip file, a missing ``profile.conf``, more than
+    ``MAX_MEMBERS`` entries, duplicate or unexpected entries, or a member over
+    its size budget (``MAX_CONF_BYTES`` / ``MAX_COOKIES_BYTES`` /
+    ``MAX_META_BYTES``) - all checked before decompressing anything.
+    """
+    try:
+        z = zipfile.ZipFile(Path(path))
+    except zipfile.BadZipFile as e:
+        raise ProfileBundleError(f"{path} is not a huligan profile bundle ({e})") from e
+    with z:
+        infos = z.infolist()
+        names = [i.filename for i in infos]
         if _CONF_NAME not in names:
-            raise ValueError(f"{path} is not a huligan profile bundle (no {_CONF_NAME})")
-        conf_text = z.read(_CONF_NAME).decode("utf-8")
+            raise ProfileBundleError(
+                f"{path} is not a huligan profile bundle (no {_CONF_NAME})")
+        if len(infos) > MAX_MEMBERS:
+            raise ProfileBundleError(
+                f"{path}: {len(infos)} entries, a profile bundle has at most {MAX_MEMBERS}")
+        unexpected = sorted(set(names) - set(_MEMBER_LIMITS))
+        if unexpected:
+            raise ProfileBundleError(f"{path}: unexpected bundle entries {unexpected}")
+        if len(set(names)) != len(names):
+            raise ProfileBundleError(f"{path}: duplicate bundle entries")
+        by_name = {i.filename: i for i in infos}
+        for info in infos:                       # budget check before any read
+            if info.file_size > _MEMBER_LIMITS[info.filename]:
+                raise ProfileBundleError(
+                    f"bundle member {info.filename} is {info.file_size} bytes "
+                    f"(limit {_MEMBER_LIMITS[info.filename]})")
+        conf_text = _read_member(z, by_name[_CONF_NAME]).decode("utf-8")
         cookie_bundle = (
-            json.loads(z.read(_COOKIES_NAME).decode("utf-8"))
-            if _COOKIES_NAME in names else None
+            json.loads(_read_member(z, by_name[_COOKIES_NAME]).decode("utf-8"))
+            if _COOKIES_NAME in by_name else None
         )
-        meta = json.loads(z.read(_META_NAME).decode("utf-8")) if _META_NAME in names else {}
+        meta = (json.loads(_read_member(z, by_name[_META_NAME]).decode("utf-8"))
+                if _META_NAME in by_name else {})
     return {"conf_text": conf_text, "cookie_bundle": cookie_bundle, "meta": meta}
 
 

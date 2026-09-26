@@ -10,6 +10,12 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-09-26): Chrome 154.0.8037.58 major bump (152 -> 154; Chrome went
+#   two-weekly and 153 was skipped). BUILD_NUMBER resets to 1. No new .conf key
+#   (CONF_SCHEMA_VERSION stays 2). TLS pin unchanged: net/ did not move .44 -> .58 and
+#   JA4 t13d1518h2_8daaf6152771_e2d80978ab2e x3 equals the stock baseline.
+#   Binary also carries the whole-line profile_reader.h fix. pyproject 1.6.3 -> 1.7.0.
+#
 # Build 4 (2026-09-26): audit P2, same Chrome 152.0.7977.65. pyproject 1.6.2 -> 1.6.3.
 #   https:// upstream proxies really use TLS (NET-01); manual .conf timezone honoured;
 #   public set_launch_selection()/get_launch_selection(); same-version rebuild
@@ -104,10 +110,10 @@ from the public binary mirror.
 #   (huligan.launch_persistent / LaunchResult / LaunchSession), shared
 #   build_launch_plan, and cookies attach-by-port helpers. Lets the desktop GUI
 #   delegate all browser/proxy/leak-flag/GeoIP launch logic to the SDK.
-BUILD_NUMBER = 4
+BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "152.0.7977.65"
+CHROME_VERSION = "154.0.8037.58"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

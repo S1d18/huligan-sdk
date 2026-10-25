@@ -38,6 +38,14 @@ _STEALTH_DISABLE_FEATURES = (
     "AddTLSServerHandshakePadding",
 )
 
+# The binary is an UNBRANDED Chromium build, and unbranded builds apply
+# testing/variations/fieldtrial_testing_config.json by default; branded stock
+# Chrome never does. That file switched off AllowD3D11WarpFallback, so on hosts
+# without a usable GPU (RDP, VPS) stock fell back to WARP while we exposed no
+# WebGL at all — a blocked-WebGL tell. Builds from 155 on are compiled with
+# disable_fieldtrial_testing_config=true; this flag covers older builds (<= 154).
+_DISABLE_FIELD_TRIAL_CONFIG = "--disable-field-trial-config"
+
 
 def build_launch_plan(
     *,
@@ -97,7 +105,7 @@ def build_launch_plan(
     Returns:
         ``(argv, env)`` ready for ``subprocess.Popen``.
     """
-    args = [str(chrome_path), "--no-sandbox"]
+    args = [str(chrome_path), "--no-sandbox", _DISABLE_FIELD_TRIAL_CONFIG]
 
     # CDP. Deliberately NO --remote-allow-origins: Chrome then refuses any
     # DevTools WebSocket whose handshake carries an Origin header, i.e. one
@@ -225,6 +233,7 @@ def get_default_stealth_args() -> list:
     Returns exactly the runtime-INDEPENDENT subset::
 
         --no-sandbox
+        --disable-field-trial-config
         --disable-features=<contents of _STEALTH_DISABLE_FEATURES>
 
     That set is version-specific and shrinks/grows per major (152 dropped two of
@@ -244,7 +253,8 @@ def get_default_stealth_args() -> list:
     WARNING: Chrome keeps only the LAST ``--disable-features`` switch. If you add
     your own, MERGE these feature names into it, or you silently drop the JA4 pins.
     """
-    return ["--no-sandbox", "--disable-features=" + ",".join(_STEALTH_DISABLE_FEATURES)]
+    return ["--no-sandbox", _DISABLE_FIELD_TRIAL_CONFIG,
+            "--disable-features=" + ",".join(_STEALTH_DISABLE_FEATURES)]
 
 
 def cdp_mode_from_conf(profile_path: Union[str, Path, None]) -> Optional[str]:

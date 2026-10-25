@@ -441,7 +441,7 @@ WEBGL1_PARAMS_BY_GPU = {
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
     },
@@ -457,7 +457,7 @@ WEBGL1_PARAMS_BY_GPU = {
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
     },
@@ -473,7 +473,7 @@ WEBGL1_PARAMS_BY_GPU = {
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
     },
@@ -489,7 +489,7 @@ WEBGL1_PARAMS_BY_GPU = {
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
     },
@@ -556,9 +556,12 @@ WEBGL2_PARAMS_CONSTANT = {
     37447: 0,                         # COPY_WRITE_BUFFER_BINDING
 }
 
-# WebGL2 getParameter values. These are ANGLE-D3D11 CONSTANTS: byte-identical across NVIDIA/Intel/AMD
-# and integrated/discrete (confirmed via real captures, 2026-07). Keep every class IDENTICAL - only the
-# renderer string differs. Do NOT re-introduce per-class variation (it is a coherence tell, not realism).
+# WebGL2 getParameter values. These are ANGLE-D3D11 CONSTANTS, identical within a VENDOR and across
+# integrated/discrete - only the renderer string differs. ONE vendor split exists: ANGLE enables
+# skipVSConstantRegisterZero for NVIDIA only (renderer11_utils.cpp), which reserves one vertex uniform
+# vector -> NVIDIA 36347=4095 / 35658=16380 / 35377=212988, Intel+AMD (and WARP) 4096 / 16384 / 212992.
+# Giving an Intel/AMD renderer the NVIDIA numbers is a set no real GPU produces (CreepJS "suspicious
+# gpu"). Do NOT add any other per-class variation (it is a coherence tell, not realism).
 WEBGL2_PARAMS_BY_GPU = {
     "nvidia_high": {
         3379: 16384,                  # MAX_TEXTURE_SIZE
@@ -610,11 +613,11 @@ WEBGL2_PARAMS_BY_GPU = {
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35657: 4096,                  # MAX_3D_TEXTURE_SIZE
-        35658: 16380,                 # MAX_ELEMENTS_VERTICES
+        35658: 16384,                 # MAX_VERTEX_UNIFORM_COMPONENTS (= 36347*4)
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
         37154: 120,                   # MAX_VERTEX_UNIFORM_COMPONENTS
@@ -630,11 +633,11 @@ WEBGL2_PARAMS_BY_GPU = {
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35657: 4096,                  # MAX_3D_TEXTURE_SIZE
-        35658: 16380,                 # MAX_ELEMENTS_VERTICES
+        35658: 16384,                 # MAX_VERTEX_UNIFORM_COMPONENTS (= 36347*4)
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
         37154: 120,                   # MAX_VERTEX_UNIFORM_COMPONENTS
@@ -650,11 +653,11 @@ WEBGL2_PARAMS_BY_GPU = {
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35657: 4096,                  # MAX_3D_TEXTURE_SIZE
-        35658: 16380,                 # MAX_ELEMENTS_VERTICES
+        35658: 16384,                 # MAX_VERTEX_UNIFORM_COMPONENTS (= 36347*4)
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
         37154: 120,                   # MAX_VERTEX_UNIFORM_COMPONENTS
@@ -670,11 +673,11 @@ WEBGL2_PARAMS_BY_GPU = {
         34921: 16,                    # MAX_VERTEX_ATTRIBS
         34930: 16,                    # MAX_TEXTURE_IMAGE_UNITS
         35657: 4096,                  # MAX_3D_TEXTURE_SIZE
-        35658: 16380,                 # MAX_ELEMENTS_VERTICES
+        35658: 16384,                 # MAX_VERTEX_UNIFORM_COMPONENTS (= 36347*4)
         35659: 120,                   # MAX_ELEMENTS_INDICES
         35660: 16,                    # MAX_VERTEX_TEXTURE_IMAGE_UNITS
         35661: 32,                    # MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        36347: 4095,                  # MAX_VERTEX_UNIFORM_VECTORS (4095*4=16380=COMPONENTS)
+        36347: 4096,                  # MAX_VERTEX_UNIFORM_VECTORS (4095 is NVIDIA-only, see note)
         36348: 30,                    # MAX_VERTEX_UNIFORM_BLOCKS
         36349: 1024,                  # MAX_FRAGMENT_UNIFORM_BLOCKS
         37154: 120,                   # MAX_VERTEX_UNIFORM_COMPONENTS
@@ -813,6 +816,15 @@ def get_fingerprint_params(renderer_string: str) -> dict:
     for enum in FINGERPRINT_PARAMS:
         if enum in gpu_params:
             result[enum] = gpu_params[enum]
+
+    # WebGL2 MAX_COMBINED_{VERTEX,FRAGMENT}_UNIFORM_COMPONENTS (35377/35379) are derived by
+    # ANGLE: 12 uniform blocks * 16384 components + the per-stage default-block components.
+    # Spoofing 35658=16380 while the host answers 35377 (WARP: 212992) produced a param set
+    # no real GPU has -> CreepJS "suspicious gpu/capabilities". Emit them so they stay coherent.
+    if 35658 in result:
+        result[35377] = 12 * 16384 + result[35658]
+    if 35657 in result:
+        result[35379] = 12 * 16384 + result[35657]
 
     return result
 

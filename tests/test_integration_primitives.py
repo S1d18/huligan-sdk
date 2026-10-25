@@ -42,6 +42,7 @@ def test_get_default_stealth_args_exact():
     """
     assert get_default_stealth_args() == [
         "--no-sandbox",
+        "--disable-field-trial-config",
         "--disable-features=AddTLSServerHandshakePadding",
     ]
 
@@ -66,3 +67,4 @@ def test_stealth_args_do_not_drift_from_launch_plan():
 
     assert stealth_features == plan_features == set(_STEALTH_DISABLE_FEATURES)
     assert "--no-sandbox" in argv and "--no-sandbox" in stealth
+    assert "--disable-field-trial-config" in argv and "--disable-field-trial-config" in stealth

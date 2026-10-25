@@ -10,6 +10,14 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-10-25): Chrome 155.0.8059.85 major bump (154 -> 155). BUILD_NUMBER resets to 1.
+#   launch_plan adds --disable-field-trial-config (unbranded Chromium otherwise applies the
+#   fieldtrial testing config, which disables the D3D11 WARP fallback -> no WebGL on GPU-less
+#   hosts). WebGL: the 4095/16380 vertex-uniform numbers are NVIDIA-only (ANGLE
+#   skipVSConstantRegisterZero); Intel/AMD now 4096/16384, plus derived webgl_param_35377/35379
+#   (WebGL2 int64 path, hooked from the 155 binary; older builds ignore them, CONF_SCHEMA_VERSION
+#   stays 2). JA4 = stock. pyproject 1.7.0 -> 1.8.0.
+#
 # Build 1 (2026-09-26): Chrome 154.0.8037.58 major bump (152 -> 154; Chrome went
 #   two-weekly and 153 was skipped). BUILD_NUMBER resets to 1. No new .conf key
 #   (CONF_SCHEMA_VERSION stays 2). TLS pin unchanged: net/ did not move .44 -> .58 and
@@ -113,7 +121,7 @@ from the public binary mirror.
 BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "154.0.8037.58"
+CHROME_VERSION = "155.0.8059.85"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"

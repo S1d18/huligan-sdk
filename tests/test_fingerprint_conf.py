@@ -67,6 +67,10 @@ NEW_KEYS = {
     # from cpu_cores via the port of Chromium's GetTierFromCores, never drawn
     # independently. Ships with CONF_SCHEMA_VERSION 2.
     "cpu_performance_tier",
+    # Chrome 155: WebGL2 MAX_COMBINED_{VERTEX,FRAGMENT}_UNIFORM_COMPONENTS, derived from
+    # 35658/35657 so the int64 GL params stay coherent with the spoofed GPU (CreepJS
+    # "suspicious gpu"). Older builds ignore them (int64 path unhooked) -> no schema bump.
+    "webgl_param_35377", "webgl_param_35379",
 }
 
 

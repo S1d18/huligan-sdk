@@ -1,9 +1,11 @@
 """WebGL fingerprint coherence guard.
 
-Codifies the ground truth established 2026-07 from real captures - native NVIDIA V100/1650/660 plus
-6 Intel/AMD Dolphin captures (integrated + discrete), ALL byte-identical: the WebGL numeric
-getParameter surface is ONE vendor/tier-independent ANGLE-D3D11 constant. Only the renderer string
-differs by GPU. These asserts would have caught every value bug fixed in this pass
+Codifies the ground truth established 2026-07 from real captures - native NVIDIA V100/1650/660 -
+corrected 2026-10: the WebGL numeric getParameter surface is an ANGLE-D3D11 constant per VENDOR, not
+global. The 2026-07 "6 Intel/AMD Dolphin captures" were NVIDIA-host numbers under a spoofed renderer
+string. ANGLE enables skipVSConstantRegisterZero for NVIDIA only (renderer11_utils.cpp), so NVIDIA
+reports 36347=4095 / 35658=16380 / 35377=212988 and Intel/AMD/WARP 4096 / 16384 / 212992. The NVIDIA
+numbers under an Intel renderer made CreepJS flag "suspicious gpu" on 155. These asserts would have caught every value bug fixed in this pass
 (34076/3379/34024 doubled-16384; integrated 35657=2048; integrated viewport [16384,16384]) and
 block their return on future Chrome upgrades.
 """
@@ -35,7 +37,7 @@ CANONICAL_NAMES = {
     37157: "MAX_FRAGMENT_INPUT_COMPONENTS",
 }
 
-# The confirmed ANGLE-D3D11 constant values (real captures; identical across all vendors + tiers).
+# The confirmed ANGLE-D3D11 constant values for NVIDIA (real captures; identical across tiers).
 CONFIRMED = {
     3379: 16384, 34024: 16384, 34076: 16384,
     3386: [32767, 32767],
@@ -45,6 +47,14 @@ CONFIRMED = {
     36347: 4095, 36348: 30, 36349: 1024,
     37154: 120, 37157: 120,
 }
+# Intel/AMD: no reserved vertex uniform vector (skipVSConstantRegisterZero is NVIDIA-only).
+CONFIRMED_NON_NVIDIA = {**CONFIRMED, 35658: 16384, 36347: 4096}
+# Derived int64 WebGL2 params: 12 uniform blocks * 16384 + per-stage default-block components.
+COMBINED = {"nvidia": {35377: 212988, 35379: 200704}, "other": {35377: 212992, 35379: 200704}}
+
+
+def _confirmed_for(label):
+    return CONFIRMED if label.startswith("nvidia") else CONFIRMED_NON_NVIDIA
 
 # Real renderer strings that must all resolve to the same constant set.
 RENDERERS = {
@@ -59,10 +69,21 @@ def _norm(v):
     return list(v) if isinstance(v, (list, tuple)) else v
 
 
-def test_all_webgl2_classes_identical():
-    """WebGL numeric params are D3D11 constants - every class must be byte-identical."""
-    ref_name, ref = next(iter(WEBGL2_PARAMS_BY_GPU.items()))
-    for name, params in WEBGL2_PARAMS_BY_GPU.items():
+def test_webgl2_classes_identical_within_vendor():
+    """WebGL numeric params are D3D11 constants - classes of one vendor must be byte-identical."""
+    for vendor in ("nvidia", "intel", "amd"):
+        classes = {n: p for n, p in WEBGL2_PARAMS_BY_GPU.items() if n.startswith(vendor)}
+        _assert_identical(classes)
+
+
+def test_intel_amd_share_values():
+    """Intel and AMD differ from NVIDIA only by the reserved register - never from each other."""
+    _assert_identical({n: p for n, p in WEBGL2_PARAMS_BY_GPU.items() if not n.startswith("nvidia")})
+
+
+def _assert_identical(classes):
+    ref_name, ref = next(iter(classes.items()))
+    for name, params in classes.items():
         diff = {e: (_norm(ref.get(e)), _norm(params.get(e)))
                 for e in set(ref) | set(params) if _norm(ref.get(e)) != _norm(params.get(e))}
         assert not diff, f"{name} differs from {ref_name}: {diff} (must be identical - per-class variation is a tell)"
@@ -85,7 +106,7 @@ def test_internal_coherence():
 
 def test_classes_match_confirmed_constants():
     for name, params in WEBGL2_PARAMS_BY_GPU.items():
-        for enum, want in CONFIRMED.items():
+        for enum, want in _confirmed_for(name).items():
             assert _norm(params.get(enum)) == _norm(want), \
                 f"{name} enum {enum} ({GL_ENUM_NAMES.get(enum)}) = {params.get(enum)}, expected {want}"
 
@@ -93,7 +114,8 @@ def test_classes_match_confirmed_constants():
 @pytest.mark.parametrize("label,renderer", list(RENDERERS.items()))
 def test_get_fingerprint_params_matches_reality(label, renderer):
     fp = get_fingerprint_params(renderer)
-    bad = {e: (fp.get(e), w) for e, w in CONFIRMED.items() if _norm(fp.get(e)) != _norm(w)}
+    want = {**_confirmed_for(label), **COMBINED["nvidia" if label.startswith("nvidia") else "other"]}
+    bad = {e: (fp.get(e), w) for e, w in want.items() if _norm(fp.get(e)) != _norm(w)}
     assert not bad, f"{label} output mismatches the real capture: {bad}"
 
 

@@ -10,6 +10,12 @@ from the public binary mirror.
 # the same Chrome version (bug fixes, doc updates, dependency changes).
 # Resets to 1 on each Chrome major bump.
 #
+# Build 1 (2026-11-07): Chrome 156.0.8078.80 major bump (155 -> 156). BUILD_NUMBER resets to 1.
+#   X-Browser-Validation is now the value measured on stock Chrome 156 (the old formula no
+#   longer matches real Chrome); patch 11b synthesizes WebRTC candidates behind a proxy
+#   (srflx = webrtc_local_ipv4, which the SDK already fills from the proxy exit). No new .conf
+#   key, CONF_SCHEMA_VERSION stays 2. pyproject 1.8.0 -> 1.9.0.
+#
 # Build 1 (2026-10-25): Chrome 155.0.8059.85 major bump (154 -> 155). BUILD_NUMBER resets to 1.
 #   launch_plan adds --disable-field-trial-config (unbranded Chromium otherwise applies the
 #   fieldtrial testing config, which disables the D3D11 WARP fallback -> no WebGL on GPU-less
@@ -121,7 +127,7 @@ from the public binary mirror.
 BUILD_NUMBER = 1
 
 # Patched Chrome version this SDK release expects to launch.
-CHROME_VERSION = "155.0.8059.85"
+CHROME_VERSION = "156.0.8078.80"
 
 # Public binary mirror used by huligan.installer.ensure_chrome().
 RELEASES_REPO = "S1d18/huligan-releases"
